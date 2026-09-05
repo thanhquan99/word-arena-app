@@ -20,7 +20,11 @@ class Transcript {
 ///           `&commit_strategy=manual&token=<token>`
 ///   Gửi     `{"message_type":"input_audio_chunk","audio_base_64":"...","sample_rate":16000}`
 ///   Chốt    cùng dạng, audio_base_64 rỗng + `"commit":true`
-///   Nhận    `{"message_type":"partial_transcript"|"final_transcript","text":"..."}`
+///   Nhận    `{"message_type":"partial_transcript"|"committed_transcript","text":"..."}`
+///
+/// ⚠️ Với `commit_strategy=manual`, kết quả cuối về dưới dạng
+/// **`committed_transcript`** (không phải `final_transcript` — cái đó chỉ xuất
+/// hiện khi để VAD tự cắt câu). Đã xác nhận bằng probe thật, không phải đoán.
 ///
 /// ⚠️ Audio phải **base64**, không phải binary thô.
 class SttClient {
@@ -70,11 +74,14 @@ class SttClient {
           text: msg['text'] as String? ?? '',
           isFinal: false,
         ),
-      'final_transcript' || 'final_transcript_with_timestamps' => Transcript(
-          text: msg['text'] as String? ?? '',
-          isFinal: true,
-        ),
-      _ => null, // các message_type còn lại đều là lỗi — xem log nếu cần
+      // committed_* = kết quả sau khi mình gọi commit() (chế độ manual).
+      // final_* = kết quả khi để VAD tự cắt câu. Bắt cả hai cho chắc.
+      'committed_transcript' ||
+      'committed_transcript_with_timestamps' ||
+      'final_transcript' ||
+      'final_transcript_with_timestamps' =>
+        Transcript(text: msg['text'] as String? ?? '', isFinal: true),
+      _ => null, // session_started và các message lỗi — bỏ qua
     };
   }
 
