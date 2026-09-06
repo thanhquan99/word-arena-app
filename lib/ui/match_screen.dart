@@ -1,17 +1,16 @@
-import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../content/content_repository.dart';
-import '../game/arena_game.dart';
 import '../game/bloc/game_bloc.dart';
 import '../game/bloc/game_event.dart';
 import '../game/bloc/game_state.dart';
 import '../net/api_client.dart';
 import 'match_end_screen.dart';
 import 'resolve_screen.dart';
+import 'widgets/board_widget.dart';
 
-/// Hosts one match: the Flame board, the resolve overlay, and the end screen.
+/// Hosts one match: the board, the resolve overlay, and the end screen.
 class MatchScreen extends StatefulWidget {
   const MatchScreen({super.key});
 
@@ -68,7 +67,11 @@ class _MatchScreenState extends State<MatchScreen> {
 
             return Stack(
               children: [
-                _Board(bloc: _bloc, state: state),
+                BoardWidget(
+                  state: state,
+                  onMissionTapped: (index) =>
+                      _bloc.add(MissionTapped(index)),
+                ),
                 if (state.phase == GamePhase.resolving)
                   ResolveScreen(api: _api),
                 if (state.isStunned) const _StunOverlay(),
@@ -78,30 +81,6 @@ class _MatchScreenState extends State<MatchScreen> {
         ),
       ),
     );
-  }
-}
-
-/// Keeps one ArenaGame instance alive across rebuilds and feeds it state.
-class _Board extends StatefulWidget {
-  const _Board({required this.bloc, required this.state});
-
-  final GameBloc bloc;
-  final GameState state;
-
-  @override
-  State<_Board> createState() => _BoardState();
-}
-
-class _BoardState extends State<_Board> {
-  late final ArenaGame _game = ArenaGame(bloc: widget.bloc);
-
-  @override
-  Widget build(BuildContext context) {
-    // Flame owns the render loop, so push state in rather than rebuilding it.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _game.applyState(widget.state);
-    });
-    return GameWidget(game: _game);
   }
 }
 
