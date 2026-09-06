@@ -1,12 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:word_arena/main.dart';
 
 void main() {
-  testWidgets('App khởi động vào màn hình spike với nút PTT', (tester) async {
+  testWidgets('the app opens on the home screen', (tester) async {
     await tester.pumpWidget(const WordArenaApp());
 
-    expect(find.text('GIỮ ĐỂ NÓI'), findsOneWidget);
-    expect(find.byType(GestureDetector), findsWidgets);
+    expect(find.text('Word Arena'), findsOneWidget);
+    expect(find.text('Chơi'), findsOneWidget);
+    // The mic spike stays reachable as a debugging tool.
+    expect(find.text('Mic spike (debug)'), findsOneWidget);
   });
 }
