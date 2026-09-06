@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:word_arena/content/models.dart';
 import 'package:word_arena/game/bloc/game_state.dart';
+import 'package:word_arena/game/logic/effects.dart';
 import 'package:word_arena/ui/widgets/board_widget.dart';
 import 'package:word_arena/ui/widgets/mission_card_widget.dart';
 
@@ -20,6 +21,7 @@ Mission _mission(
   int objectives = 2,
   int tier = 2,
   MissionType type = MissionType.vocabulary,
+  MissionEffect? effect,
 }) =>
     Mission(
       id: id,
@@ -28,6 +30,7 @@ Mission _mission(
       pace: Pace.fast,
       prompt: prompt,
       objectives: [for (var i = 0; i < objectives; i++) _objective('$id-$i')],
+      effect: effect,
     );
 
 GameState _state({
@@ -117,5 +120,39 @@ void main() {
 
     // 4 + (4 slots x 2) = 12 swords on the board.
     expect(find.text('⚔️'), findsNWidgets(12));
+  });
+
+  testWidgets('a plain mission shows no effect badge', (tester) async {
+    await tester.pumpWidget(_host(_state()));
+
+    expect(find.byType(EffectBadge), findsNothing);
+  });
+
+  testWidgets('an effect is announced before the card is tapped',
+      (tester) async {
+    // Game_Rule section 8: taking a risky mission is meant to be a decision,
+    // so the badge has to be readable while the card is still untapped.
+    await tester.pumpWidget(_host(_state(
+      missions: [
+        _mission('a', tier: 4, effect: MissionEffect.gamble),
+        for (var i = 1; i < 5; i++) _mission('m$i'),
+      ],
+    )));
+
+    expect(find.byType(EffectBadge), findsOneWidget);
+    expect(find.text(effectInfo(MissionEffect.gamble).label), findsOneWidget);
+  });
+
+  testWidgets('an effect that needs an opponent says so in its tooltip',
+      (tester) async {
+    await tester.pumpWidget(_host(_state(
+      missions: [
+        _mission('a', effect: MissionEffect.duel),
+        for (var i = 1; i < 5; i++) _mission('m$i'),
+      ],
+    )));
+
+    final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
+    expect(tooltip.message, contains('Chưa có tác dụng'));
   });
 }

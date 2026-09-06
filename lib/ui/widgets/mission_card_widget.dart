@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../content/models.dart';
+import '../../game/logic/effects.dart';
 import '../mission_visuals.dart';
 
 /// One mission slot on the map.
@@ -79,6 +80,12 @@ class MissionCardWidget extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Takes no space at all on a plain mission.
+                if (mission.effect != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: EffectBadge(effect: mission.effect!),
+                  ),
               ],
             ),
           ),
@@ -110,6 +117,58 @@ class _SwordRow extends StatelessWidget {
             child: Text('⚔️', style: TextStyle(fontSize: 11)),
           ),
       ],
+    );
+  }
+}
+
+/// The effect marker on a mission card.
+///
+/// Shown before the card is tapped (Game_Rule section 8): taking a risky
+/// mission is meant to be a decision, not a surprise. The tooltip carries the
+/// rule, because thirteen unexplained icons are thirteen riddles.
+class EffectBadge extends StatelessWidget {
+  const EffectBadge({super.key, required this.effect});
+
+  final MissionEffect effect;
+
+  static const _kindColors = <EffectKind, Color>{
+    EffectKind.good: Color(0xFF4CAF50),
+    EffectKind.risky: Color(0xFFEF5350),
+    EffectKind.special: Color(0xFF64B5F6),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final info = effectInfo(effect);
+    final color = _kindColors[info.kind]!;
+
+    return Tooltip(
+      message: '${info.label} — ${info.description}',
+      triggerMode: TooltipTriggerMode.longPress,
+      showDuration: const Duration(seconds: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(info.icon, style: const TextStyle(fontSize: 11)),
+            const SizedBox(width: 3),
+            Text(
+              info.label,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

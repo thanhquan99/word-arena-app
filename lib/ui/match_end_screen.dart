@@ -34,15 +34,26 @@ class MatchEndScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
+              won ? '🏆' : '💀',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 64),
+            ),
+            Text(
               won ? 'Thắng rồi!' : 'Hết trận',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: won ? const Color(0xFF4CAF50) : const Color(0xFFEF5350),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
+            Text(
+              'Máu còn lại  ${state.playerHp} — ${state.botHp}  Đối thủ',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Colors.white54),
+            ),
+            const SizedBox(height: 20),
             if (reviewed.isNotEmpty) ...[
               const Text(
                 'Cần ôn lại',
@@ -89,6 +100,9 @@ class _MissedTile extends StatelessWidget {
     return Card(
       color: Colors.white10,
       child: ListTile(
+        // The mode says how it was meant to be answered, which is the part
+        // worth remembering when reviewing a miss.
+        leading: Icon(_modeIcon(objective.mode), color: Colors.white38, size: 20),
         title: Text(
           objective.text,
           style: const TextStyle(color: Colors.white, fontSize: 15),
@@ -100,3 +114,11 @@ class _MissedTile extends StatelessWidget {
     );
   }
 }
+
+/// Icon for how an objective was meant to be answered.
+IconData _modeIcon(ObjectiveMode mode) => switch (mode) {
+      ObjectiveMode.speak => Icons.mic,
+      ObjectiveMode.listen => Icons.hearing,
+      ObjectiveMode.select => Icons.touch_app,
+      ObjectiveMode.arrange => Icons.reorder,
+    };

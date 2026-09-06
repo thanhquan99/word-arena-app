@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -74,7 +76,7 @@ class _MatchScreenState extends State<MatchScreen> {
                 ),
                 if (state.phase == GamePhase.resolving)
                   ResolveScreen(api: _api),
-                if (state.isStunned) const _StunOverlay(),
+                if (state.isStunned) _StunOverlay(until: state.stunUntil!),
               ],
             );
           },
@@ -84,22 +86,63 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 }
 
-class _StunOverlay extends StatelessWidget {
-  const _StunOverlay();
+/// Shown while the player is stunned.
+///
+/// Counts down rather than just saying "stunned": without a number the pause
+/// reads as the game having frozen.
+class _StunOverlay extends StatefulWidget {
+  const _StunOverlay({required this.until});
+
+  final DateTime until;
+
+  @override
+  State<_StunOverlay> createState() => _StunOverlayState();
+}
+
+class _StunOverlayState extends State<_StunOverlay> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) => setState(() {}),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final remaining = widget.until.difference(DateTime.now());
+    final seconds = (remaining.inMilliseconds / 1000).clamp(0.0, 99.0);
+
     return IgnorePointer(
       child: Container(
         color: Colors.red.withValues(alpha: 0.2),
-        child: const Center(
-          child: Text(
-            'Choáng!',
-            style: TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('💫', style: TextStyle(fontSize: 56)),
+              const Text(
+                'Choáng!',
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              Text(
+                '${seconds.toStringAsFixed(1)}s',
+                style: const TextStyle(fontSize: 22, color: Colors.white70),
+              ),
+            ],
           ),
         ),
       ),

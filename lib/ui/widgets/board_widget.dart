@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../content/models.dart';
 import '../../game/bloc/game_state.dart';
 import 'damage_number.dart';
+import 'effect_layer.dart';
 import 'hp_bar_widget.dart';
 import 'mission_card_widget.dart';
 
@@ -32,6 +33,10 @@ class _BoardWidgetState extends State<BoardWidget> {
   double? _shownDamage;
   int? _floatingDamage;
 
+  /// Restarts the particle burst; null while nothing is flying.
+  int? _burstId;
+  int _nextBurstId = 0;
+
   @override
   void didUpdateWidget(BoardWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -50,7 +55,11 @@ class _BoardWidgetState extends State<BoardWidget> {
     _shownDamage = damage;
     // initState runs during build, so defer the setState that shows the number.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _floatingDamage = damage.round());
+      if (!mounted) return;
+      setState(() {
+        _floatingDamage = damage.round();
+        _burstId = _nextBurstId++;
+      });
     });
   }
 
@@ -94,6 +103,25 @@ class _BoardWidgetState extends State<BoardWidget> {
                   ),
                 ],
               ),
+              if (_burstId != null)
+                LayoutBuilder(
+                  builder: (context, constraints) => EffectLayer(
+                    key: ValueKey(_burstId),
+                    // From the middle of the board out to the opponent's bar.
+                    origin: Offset(
+                      constraints.maxWidth / 2,
+                      constraints.maxHeight / 2,
+                    ),
+                    target: Offset(
+                      constraints.maxWidth,
+                      constraints.maxHeight / 2,
+                    ),
+                    color: const Color(0xFFEF5350),
+                    onComplete: () {
+                      if (mounted) setState(() => _burstId = null);
+                    },
+                  ),
+                ),
               if (_floatingDamage != null)
                 DamageNumber(
                   // A new key restarts the animation for each distinct hit.

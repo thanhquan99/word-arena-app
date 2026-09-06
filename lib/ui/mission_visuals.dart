@@ -28,20 +28,6 @@ IconData missionIcon(MissionType type) => switch (type) {
       MissionType.listening => Icons.hearing,
     };
 
-/// Vietnamese label for a mission type, used in the end-of-match review.
-String missionTypeLabel(MissionType type) => switch (type) {
-      MissionType.vocabulary => 'Từ vựng',
-      MissionType.phrasalVerb => 'Cụm động từ',
-      MissionType.grammar => 'Ngữ pháp',
-      MissionType.idiom => 'Thành ngữ',
-      MissionType.pronunciation => 'Phát âm',
-      MissionType.tense => 'Chia thì',
-      MissionType.roleplay => 'Đóng vai',
-      MissionType.oddOneOut => 'Tìm từ lạc',
-      MissionType.sentenceBuilder => 'Ráp câu',
-      MissionType.listening => 'Nghe',
-    };
-
 const _tierColors = <Color>[
   Color(0xFF64B5F6), // 1 — blue
   Color(0xFF4CAF50), // 2 — green
