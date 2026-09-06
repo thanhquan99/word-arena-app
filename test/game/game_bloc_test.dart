@@ -59,7 +59,11 @@ void main() {
 
   late _MockApi api;
 
-  GameBloc build({GradeResult grade = _pass}) {
+  GameBloc build({
+    GradeResult grade = _pass,
+    MissionEffect? effect,
+    List<Mission>? catalogue,
+  }) {
     when(() => api.gradeObjective(
           objective: any(named: 'objective'),
           transcript: any(named: 'transcript'),
@@ -67,10 +71,28 @@ void main() {
         )).thenAnswer((_) async => grade);
 
     return GameBloc(
-      content: FakeContentRepository(_catalogue()),
+      content: FakeContentRepository(catalogue ?? _catalogue()),
       api: api,
       random: Random(42),
+      // Pinning the effect keeps these tests readable: the alternative is
+      // hunting for a seed that happens to roll the one under test.
+      chooseEffect: (_, _) => effect,
     );
+  }
+
+  /// Plays slot [slot] to completion and returns once the mission has settled.
+  Future<void> playMission(GameBloc bloc, {int slot = 0}) async {
+    bloc.add(const GameStarted());
+    await Future<void>.delayed(Duration.zero);
+    bloc.add(MissionTapped(slot));
+    await Future<void>.delayed(Duration.zero);
+
+    final total = bloc.state.activeMission!.objectives.length;
+    for (var i = 0; i < total; i++) {
+      bloc.add(const ObjectiveAnswered('an answer'));
+      await Future<void>.delayed(Duration.zero);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
   }
 
   setUp(() => api = _MockApi());
@@ -372,5 +394,87 @@ void main() {
       },
       verify: (bloc) => expect(bloc.state.missedObjectives, isNotEmpty),
     );
+  });
+
+  group('mission effects', () {
+    test('heal pays nothing when objectives were missed', () async {
+      // The payout is conditional on a clean sweep (Game_Rule section 8.1).
+      final bloc = build(grade: _fail, effect: MissionEffect.heal);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+
+      expect(bloc.state.playerHp, GameState.maxHp);
+      expect(bloc.state.completedCount, 0);
+    });
+
+    test('heal cannot push health above the maximum', () async {
+      final bloc = build(effect: MissionEffect.heal);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+
+      expect(bloc.state.playerHp, GameState.maxHp);
+    });
+
+    test('mirror sends half the damage back at the player', () async {
+      final bloc = build(effect: MissionEffect.mirror);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+
+      final dealt = GameState.maxHp - bloc.state.botHp;
+      expect(dealt, greaterThan(0));
+      // Losing health to your own attack is the whole point of the effect.
+      expect(bloc.state.playerHp, lessThan(GameState.maxHp));
+    });
+
+    test('gamble one objective short deals nothing', () async {
+      final bloc = build(grade: _fail, effect: MissionEffect.gamble);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+
+      expect(bloc.state.botHp, GameState.maxHp);
+    });
+
+    test('the stun effect skips the escalation ladder', () async {
+      final bloc = build(grade: _fail, effect: MissionEffect.stun);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+
+      // A first miss normally costs 1.5s; the effect makes it the full 3s.
+      final remaining = bloc.state.stunUntil!.difference(DateTime.now());
+      expect(remaining.inMilliseconds, greaterThan(2000));
+    });
+
+    test('burn keeps draining the opponent after the mission', () async {
+      final bloc = build(effect: MissionEffect.burn);
+      addTearDown(bloc.close);
+
+      await playMission(bloc);
+      final afterMission = bloc.state.botHp;
+
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+      expect(bloc.state.botHp, lessThan(afterMission));
+    });
+
+    // Regression guard: a burn left running past close() would keep draining
+    // health after the match is over.
+    //
+    // A plain test because blocTest closes the bloc before verify, which would
+    // cancel the timer regardless of whether the code did.
+    test('closing the bloc cancels the burn clock', () async {
+      final bloc = build(effect: MissionEffect.burn);
+
+      await playMission(bloc);
+      expect(bloc.isBurnTimerActive, isTrue);
+
+      await bloc.close();
+
+      expect(bloc.isBurnTimerActive, isFalse);
+    });
   });
 }

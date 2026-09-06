@@ -57,3 +57,8 @@ class RefillTick extends GameEvent {
 class StunExpired extends GameEvent {
   const StunExpired();
 }
+
+/// One second of the `burn` effect elapsed.
+class BurnTick extends GameEvent {
+  const BurnTick();
+}

@@ -19,8 +19,13 @@ class StunTracker {
   bool get shouldLowerTier => _streak >= missesBeforeEasing;
 
   /// Records a mission where nothing was completed; returns how long to stun.
-  Duration recordMiss() {
+  ///
+  /// [forceMax] skips the ladder and applies the long stun immediately — the
+  /// `stun` mission effect (Game_Rule section 8.2), which is the price paid for
+  /// taking a risky mission.
+  Duration recordMiss({bool forceMax = false}) {
     _streak++;
+    if (forceMax) return _repeatMiss;
     return _streak == 1 ? _firstMiss : _repeatMiss;
   }
 

@@ -7,9 +7,14 @@ library;
 import 'dart:math';
 
 import '../../content/models.dart';
+import 'effects.dart';
 
 /// The map always shows this mix, so a round never becomes all-heavy or
 /// all-trivial.
+/// Roughly a third of missions carry an effect (Game_Rule section 8) — often
+/// enough to matter, rare enough that a plain mission still reads as normal.
+const effectChance = 0.35;
+
 const slotPaces = <Pace>[
   Pace.fast,
   Pace.fast,
@@ -18,9 +23,19 @@ const slotPaces = <Pace>[
   Pace.heavy,
 ];
 
+/// Chooses the effect for a freshly drawn mission, or null for a plain one.
+///
+/// Injectable so tests can pin a specific effect instead of hunting for a seed
+/// that happens to roll one.
+typedef EffectChooser = MissionEffect? Function(Mission mission, Random random);
+
 class MissionPool {
-  MissionPool(List<Mission> all, {Random? random})
-      : _random = random ?? Random(),
+  MissionPool(
+    List<Mission> all, {
+    Random? random,
+    EffectChooser chooseEffect = rollEffect,
+  })  : _random = random ?? Random(),
+        _chooseEffect = chooseEffect,
         _byPace = {
           for (final pace in Pace.values)
             pace: all.where((m) => m.pace == pace).toList(),
@@ -36,6 +51,7 @@ class MissionPool {
   }
 
   final Random _random;
+  final EffectChooser _chooseEffect;
   final Map<Pace, List<Mission>> _byPace;
   final List<Mission> _slots = [];
 
@@ -77,9 +93,32 @@ class MissionPool {
       final pool = different.isNotEmpty
           ? different
           : candidates.where((m) => m.id != avoid.id).toList();
-      if (pool.isNotEmpty) return pool[_random.nextInt(pool.length)];
+      if (pool.isNotEmpty) {
+        return _withEffect(pool[_random.nextInt(pool.length)]);
+      }
     }
 
-    return candidates[_random.nextInt(candidates.length)];
+    return _withEffect(candidates[_random.nextInt(candidates.length)]);
   }
+
+  /// Attaches this draw's effect.
+  ///
+  /// Rolled per draw rather than stored in the content, so the same mission
+  /// coming back around can carry something different. Builds a fresh [Mission]
+  /// because the content objects are shared between slots.
+  Mission _withEffect(Mission mission) =>
+      mission.withEffect(_chooseEffect(mission, _random));
+}
+
+/// The default effect roll (Game_Rule section 8).
+MissionEffect? rollEffect(Mission mission, Random random) {
+  if (random.nextDouble() >= effectChance) return null;
+
+  final allowed = effectsAllowedFor(
+    tier: mission.tier,
+    isAllMic: mission.isAllMic,
+  );
+  if (allowed.isEmpty) return null;
+
+  return allowed[random.nextInt(allowed.length)];
 }

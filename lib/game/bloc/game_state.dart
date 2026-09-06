@@ -22,6 +22,7 @@ class GameState extends Equatable {
     this.missStreak = 0,
     this.lastDamage,
     this.missedObjectives = const [],
+    this.shieldActive = false,
   });
 
   static const maxHp = 50;
@@ -56,6 +57,13 @@ class GameState extends Equatable {
 
   /// Objectives the player failed this match, shown in the end-of-match review.
   final List<Objective> missedObjectives;
+
+  /// Set by the `shield` effect: the next incoming hit is absorbed.
+  ///
+  /// Nothing sets it back to false yet, because in a single-player match the
+  /// bot never attacks. The flag is here so the realtime feature has it
+  /// already; it is not a bug that it stays on.
+  final bool shieldActive;
 
   Mission? get activeMission =>
       activeMissionIndex == null ? null : missions[activeMissionIndex!];
@@ -101,6 +109,7 @@ class GameState extends Equatable {
     double? lastDamage,
     bool clearLastDamage = false,
     List<Objective>? missedObjectives,
+    bool? shieldActive,
   }) {
     return GameState(
       phase: phase ?? this.phase,
@@ -115,6 +124,7 @@ class GameState extends Equatable {
       missStreak: missStreak ?? this.missStreak,
       lastDamage: clearLastDamage ? null : (lastDamage ?? this.lastDamage),
       missedObjectives: missedObjectives ?? this.missedObjectives,
+      shieldActive: shieldActive ?? this.shieldActive,
     );
   }
 
@@ -131,5 +141,6 @@ class GameState extends Equatable {
         missStreak,
         lastDamage,
         missedObjectives,
+        shieldActive,
       ];
 }

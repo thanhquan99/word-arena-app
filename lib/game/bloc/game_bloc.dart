@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../content/content_repository.dart';
+import '../../content/models.dart';
 import '../../net/api_client.dart';
 import '../../net/grade_result.dart';
 import '../logic/damage.dart';
@@ -24,9 +25,11 @@ class GameBloc extends Bloc<GameEvent, GameState> {
     required ApiClient api,
     Random? random,
     this.playerLevel = 'B1',
+    EffectChooser chooseEffect = rollEffect,
   })  : _content = content,
         _api = api,
         _random = random ?? Random(),
+        _chooseEffect = chooseEffect,
         super(const GameState()) {
     on<GameStarted>(_onStarted);
     on<MissionTapped>(_onMissionTapped);
@@ -35,12 +38,16 @@ class GameBloc extends Bloc<GameEvent, GameState> {
     on<GradeReceived>(_onGradeReceived);
     on<RefillTick>(_onRefillTick);
     on<StunExpired>(_onStunExpired);
+    on<BurnTick>(_onBurnTick);
   }
 
   final ContentRepository _content;
   final ApiClient _api;
   final Random _random;
   final String playerLevel;
+
+  /// Injectable so tests can pin a mission's effect rather than seed-hunting.
+  final EffectChooser _chooseEffect;
 
   static const idleRotation = Duration(seconds: 5);
 
@@ -51,9 +58,14 @@ class GameBloc extends Bloc<GameEvent, GameState> {
   Timer? _idleTimer;
   Timer? _stunTimer;
 
+  /// Ticks down the `burn` effect. Cancelled in [close] alongside the others —
+  /// otherwise a match that ends mid-burn keeps draining the bot's health.
+  Timer? _burnTimer;
+  int _burnTicksLeft = 0;
+
   Future<void> _onStarted(GameStarted event, Emitter<GameState> emit) async {
     final all = await _content.loadAll();
-    final pool = MissionPool(all, random: _random);
+    final pool = MissionPool(all, random: _random, chooseEffect: _chooseEffect);
     _pool = pool;
 
     emit(GameState(missions: pool.slots));
@@ -145,11 +157,14 @@ class GameBloc extends Bloc<GameEvent, GameState> {
 
     final mission = state.activeMission!;
     final completed = state.completedCount;
+    final total = mission.objectives.length;
+    final effect = mission.effect;
 
     final damage = computeDamage(
       completed: completed,
       tier: mission.tier,
       gradeMul: state.averageMultiplier,
+      effectMul: effectMultiplier(effect, completed: completed, total: total),
     );
 
     final missed = [
@@ -159,33 +174,51 @@ class GameBloc extends Bloc<GameEvent, GameState> {
     ];
 
     final botHp = max(0, state.botHp - damage.round());
+    var playerHp = state.playerHp;
+
+    // Heal pays out only on a clean sweep (Game_Rule section 8.1).
+    if (effect == MissionEffect.heal && completed == total && total > 0) {
+      playerHp = min(GameState.maxHp, playerHp + 3);
+    }
+
+    // Mirror sends half the damage back at its owner. Losing the match to your
+    // own attack is a legitimate outcome, so the win check below covers it.
+    if (effect == MissionEffect.mirror) {
+      playerHp = max(0, playerHp - (damage * 0.5).round());
+    }
 
     if (completed == 0) {
-      final duration = _stun.recordMiss();
+      // The stun effect skips the escalation ladder and goes straight to the
+      // long stun (Game_Rule section 8.2).
+      final duration = _stun.recordMiss(forceMax: effect == MissionEffect.stun);
       _startStunTimer(duration);
       emit(state.copyWith(
         botHp: botHp,
+        playerHp: playerHp,
         lastDamage: damage,
         missStreak: _stun.streak,
         stunUntil: DateTime.now().add(duration),
         missedObjectives: missed,
+        shieldActive: effect == MissionEffect.shield ? true : null,
       ));
     } else {
       _stun.recordSuccess();
       emit(state.copyWith(
         botHp: botHp,
+        playerHp: playerHp,
         lastDamage: damage,
         missStreak: 0,
         missedObjectives: missed,
+        shieldActive: effect == MissionEffect.shield ? true : null,
       ));
     }
 
-    if (botHp <= 0) {
-      _cancelIdleTimer();
-      _cancelStunTimer();
-      emit(state.copyWith(phase: GamePhase.ended, clearActiveMission: true));
+    if (botHp <= 0 || playerHp <= 0) {
+      _endMatch(emit);
       return;
     }
+
+    if (effect == MissionEffect.burn) _startBurn();
 
     _refillUsedSlot(emit);
   }
@@ -220,6 +253,43 @@ class GameBloc extends Bloc<GameEvent, GameState> {
     emit(state.copyWith(clearStun: true));
   }
 
+  /// Burns the bot for one health per second (Game_Rule section 8.1).
+  void _onBurnTick(BurnTick event, Emitter<GameState> emit) {
+    final botHp = max(0, state.botHp - 1);
+    emit(state.copyWith(botHp: botHp));
+
+    if (botHp <= 0) {
+      _cancelBurnTimer();
+      _endMatch(emit);
+    }
+  }
+
+  static const burnTicks = 5;
+
+  void _startBurn() {
+    _cancelBurnTimer();
+    _burnTicksLeft = burnTicks;
+    _burnTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (isClosed) return;
+      add(const BurnTick());
+      if (--_burnTicksLeft <= 0) _cancelBurnTimer();
+    });
+  }
+
+  void _cancelBurnTimer() {
+    _burnTimer?.cancel();
+    _burnTimer = null;
+    _burnTicksLeft = 0;
+  }
+
+  /// Stops every clock and closes out the match.
+  void _endMatch(Emitter<GameState> emit) {
+    _cancelIdleTimer();
+    _cancelStunTimer();
+    _cancelBurnTimer();
+    emit(state.copyWith(phase: GamePhase.ended, clearActiveMission: true));
+  }
+
   void _startIdleTimer() {
     _cancelIdleTimer();
     _idleTimer = Timer.periodic(idleRotation, (_) {
@@ -247,10 +317,14 @@ class GameBloc extends Bloc<GameEvent, GameState> {
   /// True while the idle rotation clock is running — asserted in tests.
   bool get isIdleTimerActive => _idleTimer?.isActive ?? false;
 
+  /// True while the burn effect is still ticking — asserted in tests.
+  bool get isBurnTimerActive => _burnTimer?.isActive ?? false;
+
   @override
   Future<void> close() {
     _cancelIdleTimer();
     _cancelStunTimer();
+    _cancelBurnTimer();
     return super.close();
   }
 }

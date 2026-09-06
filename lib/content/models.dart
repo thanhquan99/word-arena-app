@@ -28,6 +28,26 @@ enum GradingTier { exact, checklist, binary, scaled }
 /// How the player answers. `select` and `arrange` do not use the microphone.
 enum ObjectiveMode { speak, select, arrange, listen }
 
+/// A modifier carried by a mission (Game_Rule section 8).
+///
+/// `doubleDamage` rather than `double` because `double` is a Dart keyword; its
+/// JSON spelling stays `"double"` to match the rules doc.
+enum MissionEffect {
+  heal,
+  doubleDamage,
+  shield,
+  burn,
+  reveal,
+  haste,
+  stun,
+  gamble,
+  mirror,
+  silence,
+  rush,
+  coop,
+  duel,
+}
+
 /// Parse an enum from its snake_case JSON spelling.
 ///
 /// Throws rather than falling back to a default: silently mapping an unknown
@@ -108,6 +128,7 @@ class Mission {
     required this.pace,
     required this.prompt,
     required this.objectives,
+    this.effect,
   });
 
   final String id;
@@ -123,14 +144,42 @@ class Mission {
 
   final List<Objective> objectives;
 
+  /// The modifier on this mission, or null for a plain one.
+  ///
+  /// Seeded at draw time by [MissionPool] rather than stored in the content, so
+  /// the same mission can come back carrying something different.
+  final MissionEffect? effect;
+
   /// Shown in the card's corner: how much damage this mission is worth.
   int get objectiveCount => objectives.length;
+
+  /// True when no objective can be answered without the microphone, which is
+  /// what makes `silence` unplayable on this mission.
+  bool get isAllMic => objectives.every((o) => o.needsMic);
+
+  /// A copy carrying [effect], which may be null to clear it.
+  ///
+  /// Not a general `copyWith`: the `??` idiom cannot express "set this back to
+  /// null", and every draw needs to overwrite the previous draw's effect.
+  Mission withEffect(MissionEffect? effect) => Mission(
+        id: id,
+        type: type,
+        tier: tier,
+        pace: pace,
+        prompt: prompt,
+        objectives: objectives,
+        effect: effect,
+      );
 
   factory Mission.fromJson(Map<String, dynamic> json) {
     final objectives = (json['objectives'] as List)
         .cast<Map<String, dynamic>>()
         .map(Objective.fromJson)
         .toList();
+
+    // "double" in the content maps onto the renamed enum value.
+    final rawJson = json['effect'] as String?;
+    final rawEffect = rawJson == 'double' ? 'doubleDamage' : rawJson;
 
     final tier = json['tier'] as int;
     if (tier < 1 || tier > 4) {
@@ -144,6 +193,9 @@ class Mission {
       pace: _enumFromJson(Pace.values, json['pace'] as String, 'pace'),
       prompt: json['prompt'] as String,
       objectives: objectives,
+      effect: rawEffect == null
+          ? null
+          : _enumFromJson(MissionEffect.values, rawEffect, 'effect'),
     );
   }
 }

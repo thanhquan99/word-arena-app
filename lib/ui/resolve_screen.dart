@@ -7,7 +7,9 @@ import '../content/models.dart';
 import '../game/bloc/game_bloc.dart';
 import '../game/bloc/game_event.dart';
 import '../game/bloc/game_state.dart';
+import '../game/logic/effects.dart';
 import '../net/api_client.dart';
+import 'widgets/hp_bar_widget.dart';
 import 'widgets/arrange_words.dart';
 import 'widgets/ptt_button.dart';
 import 'widgets/select_answer.dart';
@@ -34,12 +36,20 @@ class _ResolveScreenState extends State<ResolveScreen> {
   }
 
   /// Restarts the clock whenever the objective changes.
-  void _syncCountdown(Objective objective) {
+  void _syncCountdown(Objective objective, GameState state) {
     if (_watchedObjectiveId == objective.id) return;
     _watchedObjectiveId = objective.id;
 
     _countdown?.cancel();
-    setState(() => _secondsLeft = objective.timeLimitSec);
+
+    // Mercy rule (Game_Rule section 4): a player who is losing badly gets more
+    // time, on top of whatever the mission's own effect does.
+    final mercy = state.playerHp / GameState.maxHp < mercyThreshold;
+    setState(() => _secondsLeft = effectiveTimeLimit(
+          baseSeconds: objective.timeLimitSec,
+          effect: state.activeMission?.effect,
+          mercy: mercy,
+        ));
 
     _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -67,7 +77,7 @@ class _ResolveScreenState extends State<ResolveScreen> {
         }
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncCountdown(objective);
+          if (mounted) _syncCountdown(objective, state);
         });
 
         return Container(
@@ -106,6 +116,9 @@ class _ResolveScreenState extends State<ResolveScreen> {
                   mission: mission,
                   api: widget.api,
                   onAnswer: _answer,
+                  // Silence locks the spoken objectives (Game_Rule section 8.2).
+                  silenced: mission.effect == MissionEffect.silence &&
+                      objective.needsMic,
                 ),
               ],
             ),
@@ -124,6 +137,7 @@ class _AnswerInput extends StatelessWidget {
     required this.mission,
     required this.api,
     required this.onAnswer,
+    required this.silenced,
   });
 
   final Objective objective;
@@ -131,8 +145,13 @@ class _AnswerInput extends StatelessWidget {
   final ApiClient api;
   final void Function(String) onAnswer;
 
+  /// True when `silence` has locked this objective.
+  final bool silenced;
+
   @override
   Widget build(BuildContext context) {
+    if (silenced) return _SilencedNotice(onExpired: () => onAnswer(''));
+
     switch (objective.mode) {
       case ObjectiveMode.select:
         return SelectAnswer(prompt: mission.prompt, onSelected: onAnswer);
@@ -176,6 +195,63 @@ class _ProgressDots extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Shown when `silence` has locked a spoken objective.
+///
+/// It expires on its own rather than waiting for the objective clock: there is
+/// nothing to do here, and leaving the player staring at a dead screen for the
+/// full limit would just be a pause.
+class _SilencedNotice extends StatefulWidget {
+  const _SilencedNotice({required this.onExpired});
+
+  final VoidCallback onExpired;
+
+  @override
+  State<_SilencedNotice> createState() => _SilencedNoticeState();
+}
+
+class _SilencedNoticeState extends State<_SilencedNotice> {
+  static const _pause = Duration(seconds: 2);
+
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(_pause, () {
+      if (mounted) widget.onExpired();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.6)),
+      ),
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('🔇', style: TextStyle(fontSize: 40)),
+          SizedBox(height: 8),
+          Text(
+            'Bị khoá — không nói được objective này',
+            style: TextStyle(fontSize: 15, color: Colors.white),
+          ),
+        ],
+      ),
     );
   }
 }

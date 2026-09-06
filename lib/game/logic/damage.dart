@@ -6,6 +6,8 @@ library;
 
 import 'dart:math' as math;
 
+import '../../content/models.dart';
+
 const _tierMultipliers = <double>[0.8, 1.0, 1.3, 1.6];
 
 /// Multiplier for a mission's difficulty tier (1..4).
@@ -16,6 +18,23 @@ double tierMultiplier(int tier) {
   final index = tier.clamp(1, _tierMultipliers.length) - 1;
   return _tierMultipliers[index];
 }
+
+/// The damage multiplier contributed by a mission's effect.
+///
+/// `mirror` returns 1.0 here: its 50% kickback lands on the *player's* own
+/// health, which is the bloc's business, not this formula's.
+double effectMultiplier(
+  MissionEffect? effect, {
+  required int completed,
+  required int total,
+}) =>
+    switch (effect) {
+      MissionEffect.doubleDamage => 2.0,
+      // All-or-nothing (Game_Rule section 8.2): one objective short pays
+      // nothing at all, not a reduced amount.
+      MissionEffect.gamble => completed == total && total > 0 ? 3.0 : 0.0,
+      _ => 1.0,
+    };
 
 /// Damage dealt for one mission.
 ///
