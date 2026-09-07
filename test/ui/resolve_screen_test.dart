@@ -197,6 +197,107 @@ void main() {
     });
   });
 
+  group('opponent progress — feature-06', () {
+    testWidgets('shows a count while you are still playing', (tester) async {
+      final m = mission();
+      bloc.emit(GameState(
+        phase: GamePhase.resolving,
+        slots: [m],
+        openedSlotIndex: 0,
+        openedMission: m,
+        objectives: m.objectives,
+        opponentProgress: 2,
+        opponentTotal: 3,
+        cardSeconds: 20,
+        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
+        connection: MatchLink.ready,
+      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(
+            value: bloc,
+            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('2/3'), findsOneWidget);
+      expect(find.text('Đối thủ'), findsOneWidget);
+    });
+
+    testWidgets('never names which objective the opponent finished',
+        (tester) async {
+      // §7.3 blocks per objective. Showing which one they just did would let a
+      // defender copy instead of guess, and half the rule would evaporate.
+      final m = mission();
+      bloc.emit(GameState(
+        phase: GamePhase.resolving,
+        slots: [m],
+        openedSlotIndex: 0,
+        openedMission: m,
+        objectives: m.objectives,
+        opponentProgress: 2,
+        opponentTotal: 3,
+        opponentCompleted: const {'o1', 'o2'},
+        cardSeconds: 20,
+        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
+        connection: MatchLink.ready,
+      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(
+            value: bloc,
+            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Each objective appears exactly once — in our own list, not marked up
+      // with anything about the opponent.
+      expect(find.text('Objective number 1'), findsOneWidget);
+      expect(find.text('Objective number 2'), findsOneWidget);
+    });
+
+    testWidgets('shows when the opponent has finished', (tester) async {
+      final m = mission();
+      bloc.emit(GameState(
+        phase: GamePhase.resolving,
+        slots: [m],
+        openedSlotIndex: 0,
+        openedMission: m,
+        objectives: m.objectives,
+        opponentProgress: 3,
+        opponentTotal: 3,
+        opponentIsDone: true,
+        cardSeconds: 20,
+        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
+        connection: MatchLink.ready,
+      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(
+            value: bloc,
+            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('✓ đã xong'), findsOneWidget);
+    });
+
+    testWidgets('still visible after you press Done', (tester) async {
+      // This is the window the feature exists for: before, it was a line of
+      // grey text and nothing else moved.
+      await show(tester, resolving(done: true));
+
+      expect(find.text('Đối thủ'), findsOneWidget);
+      expect(find.text('Đã chốt — chờ đối thủ'), findsOneWidget);
+    });
+  });
+
   group('the Done button — §7.2', () {
     testWidgets('pressing Done sends the frame that locks completedTime',
         (tester) async {

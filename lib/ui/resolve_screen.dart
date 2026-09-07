@@ -120,7 +120,9 @@ class _ResolveScreenState extends State<ResolveScreen> {
                       ),
                     ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
+                  _OpponentProgress(state: state),
+                  const SizedBox(height: 10),
                   _DoneButton(state: state),
                 ],
               ),
@@ -314,6 +316,59 @@ class _AnswerPanel extends StatelessWidget {
       case ObjectiveMode.listen:
         return PttButton(api: api, onTranscript: onAnswer);
     }
+  }
+}
+
+/// How far the opponent has got — a count, never which objectives.
+///
+/// §7.3 blocks per objective, so a defender who could watch the attacker's
+/// choices live would just copy them. The count still carries the thing that
+/// matters for pace: whether they are ahead, and whether they have finished.
+class _OpponentProgress extends StatelessWidget {
+  const _OpponentProgress({required this.state});
+
+  final GameState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = state.opponentTotal == 0
+        ? state.objectives.length
+        : state.opponentTotal;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Arena.surface2,
+        borderRadius: BorderRadius.circular(Arena.radiusSm),
+        border: Arena.borderSm,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('Đối thủ', style: TextStyle(fontSize: 13, color: Arena.inkSoft)),
+          const SizedBox(width: 10),
+          Text(
+            '${state.opponentProgress}/$total',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Arena.ink,
+            ),
+          ),
+          if (state.opponentIsDone) ...[
+            const SizedBox(width: 10),
+            const Text(
+              '✓ đã xong',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Arena.enemy,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

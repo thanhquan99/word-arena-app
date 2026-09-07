@@ -9,7 +9,7 @@ library;
 
 import '../content/models.dart';
 
-const protocolVersion = 1;
+const protocolVersion = 2;
 
 enum Stance { attack, defense }
 
@@ -40,6 +40,22 @@ enum TurnReason {
 }
 
 enum TurnOutcome { youWin, opponentWin, draw, bothDamaged, empty }
+
+/// The three beats a settled turn plays out over (feature-06).
+///
+/// The server owns this clock and sends a deadline for each beat, so the two
+/// boards stay in step — a pet must never strike after its target has already
+/// moved on to the next card.
+enum TurnStage {
+  /// Both boards show who finished what.
+  compare,
+
+  /// Damage lands; the pets cast and recoil.
+  strike,
+
+  /// The dust settles before the next board.
+  settle,
+}
 
 // ----------------------------------------------------------------- client → server
 
@@ -123,6 +139,8 @@ sealed class ServerEvent {
       'resolve_start' => ResolveStartEvent.fromJson(json),
       'objective_result' => ObjectiveResultEvent.fromJson(json),
       'turn_settled' => TurnSettledEvent.fromJson(json),
+      'turn_phase' => TurnPhaseEvent.fromJson(json),
+      'opponent_progress' => OpponentProgressEvent.fromJson(json),
       'hp' => HpEvent.fromJson(json),
       'status' => StatusEvent.fromJson(json),
       'ended' => EndedEvent.fromJson(json),
@@ -303,6 +321,48 @@ class TurnSettledEvent extends ServerEvent {
       );
 }
 
+/// Which beat of the scoring phase is playing, and when it ends.
+class TurnPhaseEvent extends ServerEvent {
+  const TurnPhaseEvent({required this.stage, required this.until});
+
+  final TurnStage stage;
+
+  /// Server clock instant this beat ends.
+  final int until;
+
+  factory TurnPhaseEvent.fromJson(Map<String, dynamic> json) => TurnPhaseEvent(
+        stage: _stage(json['stage']),
+        until: json['until'] as int,
+      );
+}
+
+/// How far along the opponent is — a count only.
+///
+/// Deliberately carries no objective id. §7.3 blocks per objective, so seeing
+/// *which* one the opponent just finished would let a defender watch and block
+/// correctly rather than guess. The breakdown comes later, in the comparison
+/// table, once there is nothing left to exploit.
+class OpponentProgressEvent extends ServerEvent {
+  const OpponentProgressEvent({
+    required this.completed,
+    required this.total,
+    required this.done,
+  });
+
+  final int completed;
+  final int total;
+
+  /// They have pressed Done and are waiting on you.
+  final bool done;
+
+  factory OpponentProgressEvent.fromJson(Map<String, dynamic> json) =>
+      OpponentProgressEvent(
+        completed: json['completed'] as int,
+        total: json['total'] as int,
+        done: json['done'] as bool? ?? false,
+      );
+}
+
 class HpEvent extends ServerEvent {
   const HpEvent({required this.you, required this.opponent});
 
@@ -385,6 +445,12 @@ class ErrorEvent extends ServerEvent {
 }
 
 // ------------------------------------------------------------------------ helpers
+
+TurnStage _stage(Object? raw) => switch (raw) {
+      'strike' => TurnStage.strike,
+      'settle' => TurnStage.settle,
+      _ => TurnStage.compare,
+    };
 
 Stance _stance(Object? raw) =>
     raw == 'defense' ? Stance.defense : Stance.attack;

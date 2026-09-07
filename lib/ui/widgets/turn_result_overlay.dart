@@ -15,9 +15,23 @@ import '../theme/arena_theme.dart';
 ///  * defending well and still taking full damage, because the block landed on
 ///    objectives the attacker never attempted (§7.3)
 class TurnResultOverlay extends StatelessWidget {
-  const TurnResultOverlay({super.key, required this.turn});
+  const TurnResultOverlay({
+    super.key,
+    required this.turn,
+    this.objectives = const [],
+    this.yourCompleted = const {},
+    this.opponentCompleted = const {},
+  });
 
   final TurnSettledEvent turn;
+
+  /// The card just played, so the table can name each row.
+  final List<Objective> objectives;
+  final Set<String> yourCompleted;
+
+  /// Only shown here, once the turn has settled — during play it would let a
+  /// defender copy the attacker's choices instead of guessing (§7.3).
+  final Set<String> opponentCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +60,16 @@ class TurnResultOverlay extends StatelessWidget {
               const SizedBox(height: 16),
 
               _Scoreline(turn: turn),
+
+              if (objectives.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _ObjectiveTable(
+                  objectives: objectives,
+                  yourCompleted: yourCompleted,
+                  opponentCompleted: opponentCompleted,
+                  blocked: turn.blocked.toSet(),
+                ),
+              ],
 
               if (turn.blocked.isNotEmpty) ...[
                 const SizedBox(height: 12),
@@ -177,6 +201,97 @@ class _SideColumn extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Who finished what, row by row.
+///
+/// This is the only place §7.3 can be learned: seeing a shield sitting on an
+/// objective the attacker never attempted is what makes "I defended and still
+/// took full damage" stop looking like a bug.
+class _ObjectiveTable extends StatelessWidget {
+  const _ObjectiveTable({
+    required this.objectives,
+    required this.yourCompleted,
+    required this.opponentCompleted,
+    required this.blocked,
+  });
+
+  final List<Objective> objectives;
+  final Set<String> yourCompleted;
+  final Set<String> opponentCompleted;
+  final Set<String> blocked;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const Row(
+          children: [
+            Expanded(child: SizedBox.shrink()),
+            SizedBox(
+              width: 44,
+              child: Text('Bạn',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: Arena.inkSoft)),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text('Đối thủ',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: Arena.inkSoft)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (final objective in objectives)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    objective.text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Arena.ink),
+                  ),
+                ),
+                _Mark(
+                  done: yourCompleted.contains(objective.id),
+                  blocked: blocked.contains(objective.id),
+                ),
+                _Mark(
+                  done: opponentCompleted.contains(objective.id),
+                  blocked: blocked.contains(objective.id),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _Mark extends StatelessWidget {
+  const _Mark({required this.done, required this.blocked});
+
+  final bool done;
+
+  /// A shield sits on an objective both sides finished — the defender
+  /// neutralised it (§7.3).
+  final bool blocked;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 44,
+      child: Text(
+        done ? (blocked ? '✅🛡️' : '✅') : '✖️',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 13),
+      ),
     );
   }
 }

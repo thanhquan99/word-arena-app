@@ -32,6 +32,11 @@ class GameState extends Equatable {
     this.cardSeconds = 0,
     this.cardStartedAt,
     this.youAreDone = false,
+    this.opponentProgress = 0,
+    this.opponentTotal = 0,
+    this.opponentIsDone = false,
+    this.turnStage,
+    this.stageDeadline,
     this.yourHp = maxHp,
     this.opponentHp = maxHp,
     this.yourStatus = const PlayerStatus(),
@@ -77,6 +82,23 @@ class GameState extends Equatable {
   /// Server clock instant the card started, for the display countdown.
   final int? cardStartedAt;
   final bool youAreDone;
+
+  /// How many objectives the opponent has finished — a count only.
+  ///
+  /// The server deliberately withholds *which* ones until the turn settles:
+  /// §7.3 blocks per objective, so watching them live would replace the guess
+  /// that rule is built on. The breakdown arrives with [lastTurn].
+  final int opponentProgress;
+  final int opponentTotal;
+
+  /// They have pressed Done and are waiting on you.
+  final bool opponentIsDone;
+
+  /// Which beat of the scoring phase is playing, or null outside it.
+  final TurnStage? turnStage;
+
+  /// Server clock instant the current beat ends.
+  final int? stageDeadline;
 
   final int yourHp;
   final int opponentHp;
@@ -125,6 +147,11 @@ class GameState extends Equatable {
     int? cardSeconds,
     int? cardStartedAt,
     bool? youAreDone,
+    int? opponentProgress,
+    int? opponentTotal,
+    bool? opponentIsDone,
+    TurnStage? turnStage,
+    int? stageDeadline,
     int? yourHp,
     int? opponentHp,
     PlayerStatus? yourStatus,
@@ -153,6 +180,11 @@ class GameState extends Equatable {
       cardSeconds: clearCard ? 0 : (cardSeconds ?? this.cardSeconds),
       cardStartedAt: clearCard ? null : (cardStartedAt ?? this.cardStartedAt),
       youAreDone: clearCard ? false : (youAreDone ?? this.youAreDone),
+      opponentProgress: clearCard ? 0 : (opponentProgress ?? this.opponentProgress),
+      opponentTotal: clearCard ? 0 : (opponentTotal ?? this.opponentTotal),
+      opponentIsDone: clearCard ? false : (opponentIsDone ?? this.opponentIsDone),
+      turnStage: clearCard ? null : (turnStage ?? this.turnStage),
+      stageDeadline: clearCard ? null : (stageDeadline ?? this.stageDeadline),
       yourHp: yourHp ?? this.yourHp,
       opponentHp: opponentHp ?? this.opponentHp,
       yourStatus: yourStatus ?? this.yourStatus,
@@ -181,6 +213,11 @@ class GameState extends Equatable {
         cardSeconds,
         cardStartedAt,
         youAreDone,
+        opponentProgress,
+        opponentTotal,
+        opponentIsDone,
+        turnStage,
+        stageDeadline,
         yourHp,
         opponentHp,
         yourStatus,

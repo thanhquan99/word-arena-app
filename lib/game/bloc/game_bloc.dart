@@ -122,6 +122,16 @@ class GameBloc extends Bloc<GameEvent, GameState> {
       case TurnSettledEvent turn:
         emit(state.copyWith(phase: GamePhase.scoring, lastTurn: turn));
 
+      case TurnPhaseEvent(:final stage, :final until):
+        emit(state.copyWith(turnStage: stage, stageDeadline: until));
+
+      case OpponentProgressEvent(:final completed, :final total, :final done):
+        emit(state.copyWith(
+          opponentProgress: completed,
+          opponentTotal: total,
+          opponentIsDone: done,
+        ));
+
       case HpEvent(:final you, :final opponent):
         emit(state.copyWith(yourHp: you, opponentHp: opponent));
 

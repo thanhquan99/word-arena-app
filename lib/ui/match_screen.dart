@@ -84,10 +84,23 @@ class _MatchScreenState extends State<MatchScreen> {
                 if (state.phase == GamePhase.stance) StanceOverlay(state: state),
                 if (state.phase == GamePhase.resolving) ResolveScreen(api: _api),
 
-                // The turn result stays up through scoring, which is the only
-                // window the player has to read why the turn went that way.
-                if (state.phase == GamePhase.scoring && state.lastTurn != null)
-                  TurnResultOverlay(turn: state.lastTurn!),
+                // The result is read during `compare`, then fades out over
+                // `strike` so the pets have the board to themselves. Before
+                // feature-06 this overlay lived for a single frame.
+                if (state.lastTurn != null && state.turnStage != null)
+                  AnimatedOpacity(
+                    opacity: state.turnStage == TurnStage.compare ? 1 : 0,
+                    duration: const Duration(milliseconds: 350),
+                    child: IgnorePointer(
+                      ignoring: state.turnStage != TurnStage.compare,
+                      child: TurnResultOverlay(
+                        turn: state.lastTurn!,
+                        objectives: state.objectives,
+                        yourCompleted: state.yourCompleted,
+                        opponentCompleted: state.opponentCompleted,
+                      ),
+                    ),
+                  ),
 
                 if (state.connection == MatchLink.connecting ||
                     state.connection == MatchLink.lost)

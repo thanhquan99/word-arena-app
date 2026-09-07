@@ -270,6 +270,72 @@ void main() {
     });
   });
 
+  group('turn pacing — feature-06', () {
+    test('each beat lands in state with its deadline', () async {
+      await joined();
+
+      for (final (raw, expected) in [
+        ('compare', TurnStage.compare),
+        ('strike', TurnStage.strike),
+        ('settle', TurnStage.settle),
+      ]) {
+        channel.emit({'type': 'turn_phase', 'stage': raw, 'until': 9000});
+        await pump();
+        expect(bloc.state.turnStage, expected);
+        expect(bloc.state.stageDeadline, 9000);
+      }
+    });
+
+    test('opponent progress is a count, and the payload carries no objective',
+        () async {
+      await joined();
+      channel.emit({
+        'type': 'opponent_progress',
+        'completed': 2,
+        'total': 4,
+        'done': false,
+      });
+      await pump();
+
+      expect(bloc.state.opponentProgress, 2);
+      expect(bloc.state.opponentTotal, 4);
+      expect(bloc.state.opponentIsDone, isFalse);
+    });
+
+    test('the opponent pressing Done is visible', () async {
+      await joined();
+      channel.emit({
+        'type': 'opponent_progress',
+        'completed': 3,
+        'total': 3,
+        'done': true,
+      });
+      await pump();
+
+      expect(bloc.state.opponentIsDone, isTrue);
+    });
+
+    test('a new card wipes the previous turn pacing', () async {
+      await joined();
+      channel.emit({'type': 'turn_phase', 'stage': 'settle', 'until': 9000});
+      channel.emit({
+        'type': 'opponent_progress',
+        'completed': 3,
+        'total': 3,
+        'done': true,
+      });
+      await pump();
+
+      channel.emit(_board());
+      await pump();
+
+      expect(bloc.state.turnStage, isNull);
+      expect(bloc.state.stageDeadline, isNull);
+      expect(bloc.state.opponentProgress, 0);
+      expect(bloc.state.opponentIsDone, isFalse);
+    });
+  });
+
   group('end of match', () {
     test('the winner comes from the server, not from health', () async {
       await joined();

@@ -173,6 +173,107 @@ void main() {
     });
   });
 
+  group('the objective table — §7.3', () {
+    List<Objective> objectives(int n) => [
+          for (var i = 1; i <= n; i++)
+            Objective.fromJson({
+              'id': 'o$i',
+              'text': 'Objective $i',
+              'mode': 'speak',
+              'timeLimitSec': 8,
+              'gradingTier': 'binary',
+            }),
+        ];
+
+    Future<void> showTable(
+      WidgetTester tester, {
+      required TurnSettledEvent event,
+      required Set<String> yours,
+      required Set<String> theirs,
+      int count = 4,
+    }) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TurnResultOverlay(
+            turn: event,
+            objectives: objectives(count),
+            yourCompleted: yours,
+            opponentCompleted: theirs,
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('every objective gets a row', (tester) async {
+      await showTable(
+        tester,
+        event: turn(),
+        yours: const {'o1', 'o2'},
+        theirs: const {'o3'},
+      );
+
+      for (var i = 1; i <= 4; i++) {
+        expect(find.text('Objective $i'), findsOneWidget);
+      }
+    });
+
+    testWidgets('marks show who finished what', (tester) async {
+      await showTable(
+        tester,
+        event: turn(),
+        yours: const {'o1', 'o2'},
+        theirs: const {'o3'},
+        count: 3,
+      );
+
+      // o1, o2 ours; o3 theirs — three ticks, three crosses.
+      expect(find.text('✅'), findsNWidgets(3));
+      expect(find.text('✖️'), findsNWidgets(3));
+    });
+
+    testWidgets('a blocked objective is marked with a shield', (tester) async {
+      await showTable(
+        tester,
+        event: turn(reason: TurnReason.blocked, blocked: const ['o1']),
+        yours: const {'o1'},
+        theirs: const {'o1'},
+        count: 2,
+      );
+
+      expect(find.text('✅🛡️'), findsNWidgets(2));
+    });
+
+    testWidgets('the doc example: guarding what was never attacked blocks nothing',
+        (tester) async {
+      // The attacker did 1 and 2; the defender did 3 and 4. No shields — and
+      // seeing that is what makes "I defended and still took full damage" stop
+      // looking like a bug.
+      await showTable(
+        tester,
+        event: turn(
+          outcome: TurnOutcome.opponentWin,
+          reason: TurnReason.blocked,
+          blocked: const [],
+        ),
+        yours: const {'o3', 'o4'},
+        theirs: const {'o1', 'o2'},
+      );
+
+      expect(find.text('✅🛡️'), findsNothing);
+      expect(find.text('✅'), findsNWidgets(4));
+    });
+
+    testWidgets('no table when the card is unknown', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: TurnResultOverlay(turn: turn())),
+      ));
+      await tester.pump();
+
+      expect(find.text('Bạn'), findsOneWidget); // the scoreline heading only
+    });
+  });
+
   group('effects', () {
     testWidgets('a bridging effect warns it lands next turn', (tester) async {
       await show(tester, turn(effect: MissionEffect.shield));
