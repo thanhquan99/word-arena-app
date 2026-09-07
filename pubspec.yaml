@@ -67,6 +67,23 @@ flutter:
 
   assets:
     - assets/content.json
+    - assets/pets/phoenix/
+    - assets/pets/tiger/
+
+  fonts:
+    # Display face — HUD, numbers, buttons. Rounded and friendly.
+    #
+    # Baloo 2 rather than Fredoka: Fredoka ships no Vietnamese diacritics
+    # (verified missing 37 codepoints including ơ ư đ ă), and every HUD label
+    # in this game is Vietnamese. Same rounded, heavy character.
+    - family: Baloo2
+      fonts:
+        - asset: assets/fonts/Baloo2.ttf
+    # Content face — English prompts and objectives. Chosen for legibility at
+    # small sizes: the learning content must never use a display face.
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

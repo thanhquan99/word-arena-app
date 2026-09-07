@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/arena_theme.dart';
+
 /// Tap-to-choose answers, used by Odd One Out.
 ///
 /// The choices come from the mission prompt ("apple / banana / carrot"), so no
@@ -25,12 +27,13 @@ class SelectAnswer extends StatelessWidget {
       alignment: WrapAlignment.center,
       children: [
         for (final choice in _choices)
-          ElevatedButton(
+          // `content: true` keeps the body face: these labels are the English
+          // being tested, not HUD words.
+          ArenaButton(
+            label: choice,
+            color: Arena.surface,
+            content: true,
             onPressed: () => onSelected(choice),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            ),
-            child: Text(choice, style: const TextStyle(fontSize: 16)),
           ),
       ],
     );

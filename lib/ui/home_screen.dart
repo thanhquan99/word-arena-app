@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme/arena_theme.dart';
+
 import '../spike/mic_spike_screen.dart';
 import 'match_screen.dart';
 
@@ -9,42 +11,32 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: Arena.bg,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Word Arena',
-                style: TextStyle(
-                  fontSize: 40,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
+              Text('Word Arena', style: Arena.head(42)),
               const SizedBox(height: 48),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MatchScreen()),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                  ),
-                  child: const Text('Chơi', style: TextStyle(fontSize: 18)),
+              ArenaButton(
+                label: 'Chơi',
+                icon: Icons.sports_esports,
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MatchScreen()),
                 ),
               ),
               const SizedBox(height: 12),
               // Kept from the mic spike: still the quickest way to check the
               // speech pipeline in isolation.
-              TextButton(
+              ArenaButton(
+                label: 'Mic spike (debug)',
+                color: Arena.surface,
+                compact: true,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const MicSpikeScreen()),
                 ),
-                child: const Text('Mic spike (debug)'),
               ),
             ],
           ),

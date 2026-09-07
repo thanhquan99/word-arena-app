@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ui/home_screen.dart';
+import 'ui/theme/arena_theme.dart';
 
 void main() => runApp(const WordArenaApp());
 
@@ -11,13 +12,7 @@ class WordArenaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Word Arena',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: Arena.theme,
       home: const HomeScreen(),
     );
   }

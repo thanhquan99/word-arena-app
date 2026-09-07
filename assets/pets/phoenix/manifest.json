@@ -1,0 +1,227 @@
+{
+  "pet": "phoenix",
+  "atlas": "atlas.png",
+  "cell": 256,
+  "rows": 4,
+  "cols": 4,
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle-1",
+        "idle-2",
+        "idle-3",
+        "idle-4"
+      ],
+      "fps": 8,
+      "loop": true
+    },
+    "fly": {
+      "frames": [
+        "fly-1",
+        "fly-2",
+        "fly-3",
+        "fly-4"
+      ],
+      "fps": 8,
+      "loop": true
+    },
+    "cast": {
+      "frames": [
+        "cast-1",
+        "cast-2",
+        "cast-3",
+        "cast-4"
+      ],
+      "fps": 8,
+      "loop": false
+    },
+    "hurt": {
+      "frames": [
+        "hurt-1",
+        "hurt-2",
+        "hurt-3",
+        "hurt-4"
+      ],
+      "fps": 8,
+      "loop": false
+    }
+  },
+  "frames": [
+    {
+      "name": "idle-1",
+      "row": "idle",
+      "index": 0,
+      "rect": [
+        0,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-2",
+      "row": "idle",
+      "index": 1,
+      "rect": [
+        256,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-3",
+      "row": "idle",
+      "index": 2,
+      "rect": [
+        512,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-4",
+      "row": "idle",
+      "index": 3,
+      "rect": [
+        768,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "fly-1",
+      "row": "fly",
+      "index": 0,
+      "rect": [
+        0,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "fly-2",
+      "row": "fly",
+      "index": 1,
+      "rect": [
+        256,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "fly-3",
+      "row": "fly",
+      "index": 2,
+      "rect": [
+        512,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "fly-4",
+      "row": "fly",
+      "index": 3,
+      "rect": [
+        768,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "cast-1",
+      "row": "cast",
+      "index": 0,
+      "rect": [
+        0,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "cast-2",
+      "row": "cast",
+      "index": 1,
+      "rect": [
+        256,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "cast-3",
+      "row": "cast",
+      "index": 2,
+      "rect": [
+        512,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "cast-4",
+      "row": "cast",
+      "index": 3,
+      "rect": [
+        768,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-1",
+      "row": "hurt",
+      "index": 0,
+      "rect": [
+        0,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-2",
+      "row": "hurt",
+      "index": 1,
+      "rect": [
+        256,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-3",
+      "row": "hurt",
+      "index": 2,
+      "rect": [
+        512,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-4",
+      "row": "hurt",
+      "index": 3,
+      "rect": [
+        768,
+        768,
+        256,
+        256
+      ]
+    }
+  ]
+}

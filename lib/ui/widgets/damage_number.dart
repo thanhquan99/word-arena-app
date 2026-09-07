@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/arena_theme.dart';
+
 /// A damage number that floats up and fades out, then reports that it is done.
 ///
 /// The parent removes it on [onComplete] — otherwise every hit would leave a
@@ -64,11 +66,18 @@ class _DamageNumberState extends State<DamageNumber>
         ),
         child: Text(
           '-${widget.amount}',
+          // Outlined rather than blur-shadowed: a hard ink stroke keeps the
+          // number legible over any card and matches the flat art direction.
           style: const TextStyle(
-            fontSize: 40,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFFEF5350),
-            shadows: [Shadow(color: Colors.black87, blurRadius: 8)],
+            fontSize: 42,
+            fontWeight: FontWeight.w800,
+            color: Arena.enemy,
+            shadows: [
+              Shadow(color: Arena.ink, offset: Offset(2, 2)),
+              Shadow(color: Arena.ink, offset: Offset(-2, 2)),
+              Shadow(color: Arena.ink, offset: Offset(2, -2)),
+              Shadow(color: Arena.ink, offset: Offset(-2, -2)),
+            ],
           ),
         ),
       ),

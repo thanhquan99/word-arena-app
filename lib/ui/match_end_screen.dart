@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme/arena_theme.dart';
+
 import '../content/models.dart';
 import '../game/bloc/game_state.dart';
 
@@ -27,7 +29,7 @@ class MatchEndScreen extends StatelessWidget {
     final reviewed = state.missedObjectives.take(_maxReviewed).toList();
 
     return Container(
-      color: const Color(0xFF1A1A2E),
+      color: Arena.bg,
       padding: const EdgeInsets.all(24),
       child: SafeArea(
         child: Column(
@@ -44,20 +46,20 @@ class MatchEndScreen extends StatelessWidget {
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.bold,
-                color: won ? const Color(0xFF4CAF50) : const Color(0xFFEF5350),
+                color: won ? Arena.self : Arena.enemy,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Máu còn lại  ${state.playerHp} — ${state.botHp}  Đối thủ',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14, color: Colors.white54),
+              style: const TextStyle(fontSize: 14, color: Arena.inkSoft),
             ),
             const SizedBox(height: 20),
             if (reviewed.isNotEmpty) ...[
               const Text(
                 'Cần ôn lại',
-                style: TextStyle(fontSize: 18, color: Colors.white70),
+                style: TextStyle(fontSize: 18, color: Arena.ink),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -71,14 +73,19 @@ class MatchEndScreen extends StatelessWidget {
                 child: Center(
                   child: Text(
                     'Không bỏ lỡ objective nào',
-                    style: TextStyle(color: Colors.white54),
+                    style: TextStyle(color: Arena.inkSoft),
                   ),
                 ),
               ),
             const SizedBox(height: 16),
-            ElevatedButton(onPressed: onPlayAgain, child: const Text('Chơi lại')),
+            ArenaButton(label: 'Chơi lại', onPressed: onPlayAgain),
             const SizedBox(height: 8),
-            TextButton(onPressed: onHome, child: const Text('Về trang chính')),
+            ArenaButton(
+              label: 'Về trang chính',
+              color: Arena.surface,
+              compact: true,
+              onPressed: onHome,
+            ),
           ],
         ),
       ),
@@ -98,18 +105,18 @@ class _MissedTile extends StatelessWidget {
         objective.targetWord;
 
     return Card(
-      color: Colors.white10,
+      color: Arena.surface,
       child: ListTile(
         // The mode says how it was meant to be answered, which is the part
         // worth remembering when reviewing a miss.
-        leading: Icon(_modeIcon(objective.mode), color: Colors.white38, size: 20),
+        leading: Icon(_modeIcon(objective.mode), color: Arena.inkSoft, size: 20),
         title: Text(
           objective.text,
-          style: const TextStyle(color: Colors.white, fontSize: 15),
+          style: const TextStyle(color: Arena.ink, fontSize: 15),
         ),
         subtitle: sample == null
             ? null
-            : Text(sample, style: const TextStyle(color: Colors.greenAccent)),
+            : Text(sample, style: const TextStyle(color: Arena.self)),
       ),
     );
   }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/arena_theme.dart';
+
 /// Health fraction below which the mercy rule applies (Game_Rule section 4):
 /// objective time limits are extended for a player who is losing badly.
 ///
@@ -34,8 +36,8 @@ class HpBarWidget extends StatelessWidget {
   double get _fraction => maxHp <= 0 ? 0 : (hp / maxHp).clamp(0.0, 1.0);
 
   Color get _color {
-    if (_fraction < mercyThreshold) return const Color(0xFFEF5350);
-    if (_fraction < 0.5) return const Color(0xFFFFA726);
+    if (_fraction < mercyThreshold) return Arena.enemy;
+    if (_fraction < 0.5) return Arena.warn;
     return baseColor;
   }
 
@@ -47,9 +49,9 @@ class HpBarWidget extends StatelessWidget {
           child: Container(
             width: _width,
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: Arena.surface2,
               borderRadius: BorderRadius.circular(_width / 2),
-              border: Border.all(color: Colors.white24),
+              border: Arena.border,
             ),
             padding: const EdgeInsets.all(3),
             // The fill is bottom-aligned so it drains downward.
@@ -60,12 +62,11 @@ class HpBarWidget extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOut,
+                  // No glow: Direction A is flat and inked, and a blurred
+                  // halo here reads as a different game from the cards.
                   decoration: BoxDecoration(
                     color: _color,
                     borderRadius: BorderRadius.circular(_width / 2),
-                    boxShadow: [
-                      BoxShadow(color: _color.withValues(alpha: 0.5), blurRadius: 8),
-                    ],
                   ),
                 ),
               ),
@@ -77,13 +78,17 @@ class HpBarWidget extends StatelessWidget {
           '$hp',
           style: TextStyle(
             fontSize: 16,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w800,
             color: _color,
           ),
         ),
         Text(
           label,
-          style: const TextStyle(fontSize: 10, color: Colors.white54),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: Arena.inkSoft,
+          ),
         ),
       ],
     );

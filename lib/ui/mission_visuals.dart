@@ -10,6 +10,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../content/models.dart';
+import 'theme/arena_theme.dart';
 
 /// The icon shown in a mission card's top-left corner.
 ///
@@ -28,15 +29,9 @@ IconData missionIcon(MissionType type) => switch (type) {
       MissionType.listening => Icons.hearing,
     };
 
-const _tierColors = <Color>[
-  Color(0xFF64B5F6), // 1 — blue
-  Color(0xFF4CAF50), // 2 — green
-  Color(0xFFFFA726), // 3 — orange
-  Color(0xFFEF5350), // 4 — red
-];
-
 /// Colour for a mission's difficulty tier (1..4).
 ///
-/// Clamps rather than throws, matching `tierMultiplier` in game/logic/damage.dart:
+/// Delegates to [Arena.tier] so the palette lives in one place; it clamps
+/// rather than throws, matching `tierMultiplier` in game/logic/damage.dart —
 /// bad content should not be able to crash a match that is already running.
-Color tierColor(int tier) => _tierColors[tier.clamp(1, _tierColors.length) - 1];
+Color tierColor(int tier) => Arena.tier(tier);

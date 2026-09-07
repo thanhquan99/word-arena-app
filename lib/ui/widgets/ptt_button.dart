@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../theme/arena_theme.dart';
 import 'package:flutter/services.dart';
 
 import '../../net/api_client.dart';
@@ -131,9 +133,9 @@ class _PttButtonState extends State<PttButton> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(_partial,
-                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                style: const TextStyle(color: Arena.ink, fontSize: 16)),
           ),
-        Text(_status, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text(_status, style: const TextStyle(color: Arena.inkSoft, fontSize: 12)),
         const SizedBox(height: 8),
         GestureDetector(
           onTapDown: (_) => _start(),
@@ -144,17 +146,17 @@ class _PttButtonState extends State<PttButton> {
             width: double.infinity,
             decoration: BoxDecoration(
               color: !widget.enabled
-                  ? Colors.grey
+                  ? Arena.surface2
                   : _recording
-                      ? Colors.red
-                      : Colors.blue,
+                      ? Arena.enemy
+                      : Arena.accent,
               borderRadius: BorderRadius.circular(36),
             ),
             child: Center(
               child: Text(
                 _recording ? 'THẢ ĐỂ GỬI' : 'GIỮ ĐỂ NÓI',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: Arena.ink,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),

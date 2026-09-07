@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../content/models.dart';
 import '../../game/logic/effects.dart';
 import '../mission_visuals.dart';
+import '../theme/arena_theme.dart';
 
 /// One mission slot on the map.
 ///
@@ -37,56 +38,77 @@ class MissionCardWidget extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(16),
-          splashColor: color.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(Arena.radius),
+          splashColor: color.withValues(alpha: 0.22),
           child: Ink(
+            // Flat white with a thick ink outline and a hard shadow, per the
+            // Playground spec. The tier colour appears as the left stripe and
+            // on the icon rather than tinting the whole card, so the English
+            // prompt keeps maximum contrast.
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withValues(alpha: 0.28),
-                  color.withValues(alpha: 0.10),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color, width: 2),
+              color: Arena.surface,
+              borderRadius: BorderRadius.circular(Arena.radius),
+              border: Arena.border,
+              boxShadow: Arena.lift,
             ),
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Icon(missionIcon(mission.type), size: 20, color: color),
-                    _SwordRow(count: mission.objectiveCount, color: color),
-                  ],
-                ),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      mission.prompt,
-                      textAlign: TextAlign.center,
-                      // Long prompts are cut rather than shrunk: the full text
-                      // is shown on the resolve screen once the card is tapped.
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+            // The tier stripe is a clipped child, not a coloured left border:
+            // Flutter rejects borderRadius on a border whose sides differ in
+            // colour, and inside the clip the stripe follows the corner curve.
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Arena.radius - Arena.borderW),
+              child: Row(
+                children: [
+                  Container(width: 6, color: color),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(9),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Icon(
+                                missionIcon(mission.type),
+                                size: 20,
+                                color: color,
+                              ),
+                              _SwordRow(
+                                count: mission.objectiveCount,
+                                color: color,
+                              ),
+                            ],
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                mission.prompt,
+                                textAlign: TextAlign.center,
+                                // Long prompts are cut rather than shrunk: the
+                                // full text is shown on the resolve screen
+                                // once the card is tapped.
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: Arena.ink,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Takes no space at all on a plain mission.
+                          if (mission.effect != null)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: EffectBadge(effect: mission.effect!),
+                            ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-                // Takes no space at all on a plain mission.
-                if (mission.effect != null)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: EffectBadge(effect: mission.effect!),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

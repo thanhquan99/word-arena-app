@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/arena_theme.dart';
+
 /// Drag the scrambled words into order, used by Sentence Builder.
 ///
 /// Sends the joined sentence as the transcript, so the server grades it with
@@ -58,9 +60,10 @@ class _ArrangeWordsState extends State<ArrangeWords> {
           ),
         ),
         const SizedBox(height: 12),
-        ElevatedButton(
+        ArenaButton(
+          label: 'Xong',
+          icon: Icons.check,
           onPressed: () => widget.onSubmitted(_words.join(' ')),
-          child: const Text('Xong'),
         ),
       ],
     );

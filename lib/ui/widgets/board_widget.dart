@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../content/models.dart';
 import '../../game/bloc/game_state.dart';
+import '../../pet/pet_spec.dart';
+import '../theme/arena_theme.dart';
 import 'damage_number.dart';
 import 'effect_layer.dart';
 import 'hp_bar_widget.dart';
 import 'mission_card_widget.dart';
+import 'pet_corner.dart';
 
 /// The match board: health on both flanks, missions in the middle.
 ///
@@ -18,10 +21,18 @@ class BoardWidget extends StatefulWidget {
     super.key,
     required this.state,
     required this.onMissionTapped,
+    this.playerPet = PetSpec.fire,
+    this.opponentPet = PetSpec.storm,
   });
 
   final GameState state;
   final void Function(int slotIndex) onMissionTapped;
+
+  /// Each side's pet. Defaults pair the phoenix against the tiger, which are
+  /// the two sheets that ship; a pet with no art falls back to the vector rig
+  /// inside [PetView], so any pairing is safe.
+  final PetSpec playerPet;
+  final PetSpec opponentPet;
 
   @override
   State<BoardWidget> createState() => _BoardWidgetState();
@@ -69,7 +80,16 @@ class _BoardWidgetState extends State<BoardWidget> {
     final interactive = state.phase == GamePhase.idle && !state.isStunned;
 
     return Container(
-      color: const Color(0xFF1A1A2E),
+      // The warm ground of Direction A. The generated pet sprites are drawn
+      // with dark outlines for exactly this background — on the dark scheme
+      // this replaced, their outlines vanished.
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment(-0.55, -0.85),
+          radius: 1.2,
+          colors: [Color(0xFFFFE9C4), Arena.bg],
+        ),
+      ),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -79,11 +99,18 @@ class _BoardWidgetState extends State<BoardWidget> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  HpBarWidget(
-                    label: 'Bạn',
-                    hp: state.playerHp,
-                    maxHp: GameState.maxHp,
-                    baseColor: const Color(0xFF4CAF50),
+                  _Flank(
+                    pet: PetCorner(
+                      spec: widget.playerPet,
+                      state: state,
+                      isPlayer: true,
+                    ),
+                    bar: HpBarWidget(
+                      label: 'Bạn',
+                      hp: state.playerHp,
+                      maxHp: GameState.maxHp,
+                      baseColor: Arena.self,
+                    ),
                   ),
                   Expanded(
                     child: Padding(
@@ -95,11 +122,18 @@ class _BoardWidgetState extends State<BoardWidget> {
                       ),
                     ),
                   ),
-                  HpBarWidget(
-                    label: 'Đối thủ',
-                    hp: state.botHp,
-                    maxHp: GameState.maxHp,
-                    baseColor: const Color(0xFFEF5350),
+                  _Flank(
+                    pet: PetCorner(
+                      spec: widget.opponentPet,
+                      state: state,
+                      isPlayer: false,
+                    ),
+                    bar: HpBarWidget(
+                      label: 'Đối thủ',
+                      hp: state.botHp,
+                      maxHp: GameState.maxHp,
+                      baseColor: Arena.enemy,
+                    ),
                   ),
                 ],
               ),
@@ -116,7 +150,7 @@ class _BoardWidgetState extends State<BoardWidget> {
                       constraints.maxWidth,
                       constraints.maxHeight / 2,
                     ),
-                    color: const Color(0xFFEF5350),
+                    color: Arena.enemy,
                     onComplete: () {
                       if (mounted) setState(() => _burstId = null);
                     },
@@ -134,6 +168,39 @@ class _BoardWidgetState extends State<BoardWidget> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A fighter's column: their pet above, their health bar below.
+///
+/// The pet sits on top rather than alongside because the bars run the full
+/// height of the board — putting the pet beside one would eat into the mission
+/// grid, which is the part players actually aim at.
+class _Flank extends StatelessWidget {
+  const _Flank({required this.pet, required this.bar});
+
+  final Widget pet;
+  final Widget bar;
+
+  /// Width of the pet column. The health bar is 34px, so this trades 22px of
+  /// mission-grid width per side for a sprite that reads as a creature rather
+  /// than an icon: the generated art carries stripes, feathers and a face,
+  /// none of which survives at bar width.
+  static const _width = 56.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: _width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox.square(dimension: _width, child: pet),
+          const SizedBox(height: 6),
+          Expanded(child: Center(child: bar)),
+        ],
       ),
     );
   }

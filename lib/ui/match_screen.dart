@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'theme/arena_theme.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../content/content_repository.dart';
@@ -124,7 +126,7 @@ class _StunOverlayState extends State<_StunOverlay> {
 
     return IgnorePointer(
       child: Container(
-        color: Colors.red.withValues(alpha: 0.2),
+        color: Arena.enemy.withValues(alpha: 0.22),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -135,12 +137,12 @@ class _StunOverlayState extends State<_StunOverlay> {
                 style: TextStyle(
                   fontSize: 36,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Arena.ink,
                 ),
               ),
               Text(
                 '${seconds.toStringAsFixed(1)}s',
-                style: const TextStyle(fontSize: 22, color: Colors.white70),
+                style: const TextStyle(fontSize: 22, color: Arena.inkSoft),
               ),
             ],
           ),

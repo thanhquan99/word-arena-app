@@ -1,0 +1,227 @@
+{
+  "pet": "tiger",
+  "atlas": "atlas.png",
+  "cell": 256,
+  "rows": 4,
+  "cols": 4,
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle-1",
+        "idle-2",
+        "idle-3",
+        "idle-4"
+      ],
+      "fps": 8,
+      "loop": true
+    },
+    "walk": {
+      "frames": [
+        "walk-1",
+        "walk-2",
+        "walk-3",
+        "walk-4"
+      ],
+      "fps": 8,
+      "loop": true
+    },
+    "pounce": {
+      "frames": [
+        "pounce-1",
+        "pounce-2",
+        "pounce-3",
+        "pounce-4"
+      ],
+      "fps": 8,
+      "loop": false
+    },
+    "hurt": {
+      "frames": [
+        "hurt-1",
+        "hurt-2",
+        "hurt-3",
+        "hurt-4"
+      ],
+      "fps": 8,
+      "loop": false
+    }
+  },
+  "frames": [
+    {
+      "name": "idle-1",
+      "row": "idle",
+      "index": 0,
+      "rect": [
+        0,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-2",
+      "row": "idle",
+      "index": 1,
+      "rect": [
+        256,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-3",
+      "row": "idle",
+      "index": 2,
+      "rect": [
+        512,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "idle-4",
+      "row": "idle",
+      "index": 3,
+      "rect": [
+        768,
+        0,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "walk-1",
+      "row": "walk",
+      "index": 0,
+      "rect": [
+        0,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "walk-2",
+      "row": "walk",
+      "index": 1,
+      "rect": [
+        256,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "walk-3",
+      "row": "walk",
+      "index": 2,
+      "rect": [
+        512,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "walk-4",
+      "row": "walk",
+      "index": 3,
+      "rect": [
+        768,
+        256,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "pounce-1",
+      "row": "pounce",
+      "index": 0,
+      "rect": [
+        0,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "pounce-2",
+      "row": "pounce",
+      "index": 1,
+      "rect": [
+        256,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "pounce-3",
+      "row": "pounce",
+      "index": 2,
+      "rect": [
+        512,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "pounce-4",
+      "row": "pounce",
+      "index": 3,
+      "rect": [
+        768,
+        512,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-1",
+      "row": "hurt",
+      "index": 0,
+      "rect": [
+        0,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-2",
+      "row": "hurt",
+      "index": 1,
+      "rect": [
+        256,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-3",
+      "row": "hurt",
+      "index": 2,
+      "rect": [
+        512,
+        768,
+        256,
+        256
+      ]
+    },
+    {
+      "name": "hurt-4",
+      "row": "hurt",
+      "index": 3,
+      "rect": [
+        768,
+        768,
+        256,
+        256
+      ]
+    }
+  ]
+}

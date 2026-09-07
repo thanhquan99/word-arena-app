@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'theme/arena_theme.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../content/models.dart';
@@ -81,7 +83,7 @@ class _ResolveScreenState extends State<ResolveScreen> {
         });
 
         return Container(
-          color: Colors.black.withValues(alpha: 0.88),
+          color: Arena.bg.withValues(alpha: 0.95),
           padding: const EdgeInsets.all(20),
           child: SafeArea(
             child: Column(
@@ -93,7 +95,7 @@ class _ResolveScreenState extends State<ResolveScreen> {
                   style: const TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: Arena.ink,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -101,14 +103,14 @@ class _ResolveScreenState extends State<ResolveScreen> {
                   '$_secondsLeft s',
                   style: TextStyle(
                     fontSize: 18,
-                    color: _secondsLeft <= 3 ? Colors.red : Colors.white54,
+                    color: _secondsLeft <= 3 ? Arena.enemy : Arena.inkSoft,
                   ),
                 ),
                 const SizedBox(height: 24),
                 Text(
                   objective.text,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 18, color: Colors.white),
+                  style: const TextStyle(fontSize: 18, color: Arena.ink),
                 ),
                 const Spacer(),
                 _AnswerInput(
@@ -186,10 +188,10 @@ class _ProgressDots extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: switch (state.results[i]) {
                   null => i < state.objectiveIndex
-                      ? Colors.grey // answered, still grading
-                      : Colors.white24, // not reached yet
-                  final r when r.passed => Colors.green,
-                  _ => Colors.red,
+                      ? Arena.inkSoft // answered, still grading
+                      : Arena.surface2, // not reached yet
+                  final r when r.passed => Arena.self,
+                  _ => Arena.enemy,
                 },
               ),
             ),
@@ -237,9 +239,9 @@ class _SilencedNoticeState extends State<_SilencedNotice> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.15),
+        color: Arena.enemy.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.6)),
+        border: Border.all(color: Arena.enemy, width: Arena.borderWSm),
       ),
       child: const Column(
         mainAxisSize: MainAxisSize.min,
@@ -248,7 +250,7 @@ class _SilencedNoticeState extends State<_SilencedNotice> {
           SizedBox(height: 8),
           Text(
             'Bị khoá — không nói được objective này',
-            style: TextStyle(fontSize: 15, color: Colors.white),
+            style: TextStyle(fontSize: 15, color: Arena.ink),
           ),
         ],
       ),
