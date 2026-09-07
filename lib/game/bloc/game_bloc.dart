@@ -1,330 +1,196 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../content/content_repository.dart';
-import '../../content/models.dart';
-import '../../net/api_client.dart';
-import '../../net/grade_result.dart';
-import '../logic/damage.dart';
-import '../logic/mission_pool.dart';
-import '../logic/stun.dart';
+import '../../net/match_socket.dart';
+import '../../net/protocol.dart';
 import 'game_event.dart';
 import 'game_state.dart';
 
-/// Drives one single-player match:
+/// Translates between the match socket and the UI.
 ///
-///     idle -> resolving -> scoring -> refill -> idle
+/// That is the whole job. Since feature-05 every rule lives on the server —
+/// there is no damage formula here, no board pool, no timer that decides
+/// anything. The bloc turns [ServerEvent]s into [GameState] and player taps
+/// into [ClientMessage]s, and nothing else.
 ///
-/// There is no `race` phase: with no opponent, a tap goes straight into the
-/// mission.
+/// The card clock is a case in point: the server owns it, and the countdown
+/// the player sees is computed from a deadline the server set. If this class
+/// and the server ever disagree, the server is right.
 class GameBloc extends Bloc<GameEvent, GameState> {
-  GameBloc({
-    required ContentRepository content,
-    required ApiClient api,
-    Random? random,
-    this.playerLevel = 'B1',
-    EffectChooser chooseEffect = rollEffect,
-  })  : _content = content,
-        _api = api,
-        _random = random ?? Random(),
-        _chooseEffect = chooseEffect,
+  GameBloc({required MatchSocket socket})
+      : _socket = socket,
         super(const GameState()) {
-    on<GameStarted>(_onStarted);
-    on<MissionTapped>(_onMissionTapped);
+    on<MatchJoined>(_onJoined);
+    on<CardTapped>(_onCardTapped);
+    on<StanceChosen>(_onStanceChosen);
     on<ObjectiveAnswered>(_onObjectiveAnswered);
-    on<ObjectiveTimedOut>(_onObjectiveTimedOut);
-    on<GradeReceived>(_onGradeReceived);
-    on<RefillTick>(_onRefillTick);
-    on<StunExpired>(_onStunExpired);
-    on<BurnTick>(_onBurnTick);
+    on<TurnFinished>(_onTurnFinished);
+    on<ServerEventReceived>(_onServerEvent);
+    on<ConnectionChanged>(_onConnectionChanged);
+
+    _subscription = _socket.events.listen(
+      (event) => add(ServerEventReceived(event)),
+      onDone: () => add(const ConnectionChanged(true)),
+    );
   }
 
-  final ContentRepository _content;
-  final ApiClient _api;
-  final Random _random;
-  final String playerLevel;
+  final MatchSocket _socket;
+  late final StreamSubscription<ServerEvent> _subscription;
 
-  /// Injectable so tests can pin a mission's effect rather than seed-hunting.
-  final EffectChooser _chooseEffect;
+  // -------------------------------------------------------------- player intent
 
-  static const idleRotation = Duration(seconds: 5);
-
-  MissionPool? _pool;
-  final _stun = StunTracker();
-
-  /// Rotates the oldest slot while nobody is playing. Only ever runs in `idle`.
-  Timer? _idleTimer;
-  Timer? _stunTimer;
-
-  /// Ticks down the `burn` effect. Cancelled in [close] alongside the others —
-  /// otherwise a match that ends mid-burn keeps draining the bot's health.
-  Timer? _burnTimer;
-  int _burnTicksLeft = 0;
-
-  Future<void> _onStarted(GameStarted event, Emitter<GameState> emit) async {
-    final all = await _content.loadAll();
-    final pool = MissionPool(all, random: _random, chooseEffect: _chooseEffect);
-    _pool = pool;
-
-    emit(GameState(missions: pool.slots));
-    _startIdleTimer();
+  Future<void> _onJoined(MatchJoined event, Emitter<GameState> emit) async {
+    emit(state.copyWith(connection: MatchLink.connecting, isBot: event.mode == MatchMode.bot));
+    await _socket.join(event.mode, level: event.level);
   }
 
-  void _onMissionTapped(MissionTapped event, Emitter<GameState> emit) {
-    if (state.phase != GamePhase.idle || state.isStunned) return;
+  void _onCardTapped(CardTapped event, Emitter<GameState> emit) {
+    if (!state.canTap) return;
+    // No optimistic phase change: the server runs a 250ms race window (§3.2)
+    // and may well open a different card than the one just tapped.
+    _socket.tapCard(event.slotIndex);
+  }
 
-    // The rotation clock belongs to `idle` alone. Leaving it running would let
-    // a mission be swapped out from under the player mid-answer.
-    _cancelIdleTimer();
+  void _onStanceChosen(StanceChosen event, Emitter<GameState> emit) {
+    if (state.phase != GamePhase.stance) return;
+    if (event.stance == Stance.defense && !state.defenseAllowed) return;
 
-    final mission = state.missions[event.slotIndex];
-    emit(state.copyWith(
-      phase: GamePhase.resolving,
-      activeMissionIndex: event.slotIndex,
-      objectiveIndex: 0,
-      results: List<GradeResult?>.filled(mission.objectives.length, null),
-      clearLastDamage: true,
-    ));
+    _socket.setStance(event.stance);
+    emit(state.copyWith(yourStance: event.stance));
   }
 
   void _onObjectiveAnswered(ObjectiveAnswered event, Emitter<GameState> emit) {
-    final objective = state.activeObjective;
-    if (objective == null) return;
-
-    final index = state.objectiveIndex;
-
-    // Fire the grade request and move on. Grading takes ~1.2s; waiting for it
-    // between objectives would leave a four-step mission idle for five seconds.
-    unawaited(
-      _api
-          .gradeObjective(
-            objective: objective,
-            transcript: event.transcript,
-            level: playerLevel,
-          )
-          .then((result) {
-        if (isClosed) return;
-        add(GradeReceived(objectiveIndex: index, result: result));
-      }),
-    );
-
-    _advance(emit);
+    if (state.phase != GamePhase.resolving || state.youAreDone) return;
+    _socket.answer(event.objectiveId, event.transcript);
   }
 
-  void _onObjectiveTimedOut(ObjectiveTimedOut event, Emitter<GameState> emit) {
-    final index = state.objectiveIndex;
-    if (index >= state.results.length) return;
+  void _onTurnFinished(TurnFinished event, Emitter<GameState> emit) {
+    if (state.phase != GamePhase.resolving || state.youAreDone) return;
 
-    // Nothing was said, so nothing to grade — record the miss directly.
-    final results = [...state.results];
-    results[index] = const GradeResult(passed: false, multiplier: 0);
-    emit(state.copyWith(results: results));
-
-    _advance(emit);
+    _socket.done();
+    emit(state.copyWith(youAreDone: true));
   }
 
-  /// Steps to the next objective, or resolves the mission when they run out.
-  void _advance(Emitter<GameState> emit) {
-    final mission = state.activeMission;
-    if (mission == null) return;
+  // ------------------------------------------------------------ from the server
 
-    final next = state.objectiveIndex + 1;
-    if (next < mission.objectives.length) {
-      emit(state.copyWith(objectiveIndex: next));
-      return;
+  void _onServerEvent(ServerEventReceived wrapper, Emitter<GameState> emit) {
+    switch (wrapper.event) {
+      case MatchedEvent(:final isBot):
+        emit(state.copyWith(connection: MatchLink.ready, isBot: isBot));
+
+      case BoardEvent(:final slots, :final phase):
+        emit(state.copyWith(
+          slots: slots,
+          phase: _phaseFrom(phase),
+          connection: MatchLink.ready,
+          // A board frame means the previous turn is over and the card is gone.
+          clearCard: phase == 'idle',
+        ));
+
+      case CardOpenedEvent(
+          :final slotIndex,
+          :final mission,
+          :final defenseAllowed,
+          :final stanceDeadline,
+        ):
+        emit(state.copyWith(
+          phase: GamePhase.stance,
+          openedSlotIndex: slotIndex,
+          openedMission: mission,
+          objectives: mission.objectives,
+          defenseAllowed: defenseAllowed,
+          stanceDeadline: stanceDeadline,
+          clearLastTurn: true,
+        ));
+
+      case StanceLockedEvent(:final you, :final opponent):
+        emit(state.copyWith(yourStance: you, opponentStance: opponent));
+
+      case ResolveStartEvent(:final objectives, :final cardSeconds, :final startedAt):
+        emit(state.copyWith(
+          phase: GamePhase.resolving,
+          objectives: objectives,
+          cardSeconds: cardSeconds,
+          cardStartedAt: startedAt,
+          youAreDone: false,
+        ));
+
+      case ObjectiveResultEvent(:final objectiveId, :final passed, :final mine):
+        emit(_withGrade(objectiveId, passed: passed, mine: mine));
+
+      case TurnSettledEvent turn:
+        emit(state.copyWith(phase: GamePhase.scoring, lastTurn: turn));
+
+      case HpEvent(:final you, :final opponent):
+        emit(state.copyWith(yourHp: you, opponentHp: opponent));
+
+      case StatusEvent(:final you, :final opponent):
+        emit(state.copyWith(yourStatus: you, opponentStatus: opponent));
+
+      case EndedEvent(:final winner):
+        emit(state.copyWith(phase: GamePhase.ended, winner: winner));
+
+      case ErrorEvent error:
+        emit(_withError(error));
+    }
+  }
+
+  GameState _withGrade(String objectiveId, {required bool passed, required bool mine}) {
+    if (!mine) {
+      final completed = {...state.opponentCompleted};
+      passed ? completed.add(objectiveId) : completed.remove(objectiveId);
+      return state.copyWith(opponentCompleted: completed);
     }
 
-    emit(state.copyWith(phase: GamePhase.scoring));
-    _settleIfReady(emit);
-  }
+    final completed = {...state.yourCompleted};
+    final failed = {...state.yourFailed};
 
-  void _onGradeReceived(GradeReceived event, Emitter<GameState> emit) {
-    if (event.objectiveIndex >= state.results.length) return;
-
-    final results = [...state.results];
-    results[event.objectiveIndex] = event.result;
-    emit(state.copyWith(results: results));
-
-    // A grade can land after the player has already finished the mission.
-    if (state.phase == GamePhase.scoring) _settleIfReady(emit);
-  }
-
-  /// Applies damage once every grade for the mission has arrived.
-  void _settleIfReady(Emitter<GameState> emit) {
-    if (state.phase != GamePhase.scoring || !state.allGradesIn) return;
-
-    final mission = state.activeMission!;
-    final completed = state.completedCount;
-    final total = mission.objectives.length;
-    final effect = mission.effect;
-
-    final damage = computeDamage(
-      completed: completed,
-      tier: mission.tier,
-      gradeMul: state.averageMultiplier,
-      effectMul: effectMultiplier(effect, completed: completed, total: total),
-    );
-
-    final missed = [
-      ...state.missedObjectives,
-      for (var i = 0; i < state.results.length; i++)
-        if (!(state.results[i]?.passed ?? false)) mission.objectives[i],
-    ];
-
-    final botHp = max(0, state.botHp - damage.round());
-    var playerHp = state.playerHp;
-
-    // Heal pays out only on a clean sweep (Game_Rule section 8.1).
-    if (effect == MissionEffect.heal && completed == total && total > 0) {
-      playerHp = min(GameState.maxHp, playerHp + 3);
-    }
-
-    // Mirror sends half the damage back at its owner. Losing the match to your
-    // own attack is a legitimate outcome, so the win check below covers it.
-    if (effect == MissionEffect.mirror) {
-      playerHp = max(0, playerHp - (damage * 0.5).round());
-    }
-
-    if (completed == 0) {
-      // The stun effect skips the escalation ladder and goes straight to the
-      // long stun (Game_Rule section 8.2).
-      final duration = _stun.recordMiss(forceMax: effect == MissionEffect.stun);
-      _startStunTimer(duration);
-      emit(state.copyWith(
-        botHp: botHp,
-        playerHp: playerHp,
-        lastDamage: damage,
-        missStreak: _stun.streak,
-        stunUntil: DateTime.now().add(duration),
-        missedObjectives: missed,
-        shieldActive: effect == MissionEffect.shield ? true : null,
-      ));
+    if (passed) {
+      completed.add(objectiveId);
+      failed.remove(objectiveId);
     } else {
-      _stun.recordSuccess();
-      emit(state.copyWith(
-        botHp: botHp,
-        playerHp: playerHp,
-        lastDamage: damage,
-        missStreak: 0,
-        missedObjectives: missed,
-        shieldActive: effect == MissionEffect.shield ? true : null,
-      ));
+      completed.remove(objectiveId);
+      // Kept so the card can show ✖️ — the objective is still retryable while
+      // the clock runs (§3.4).
+      failed.add(objectiveId);
     }
 
-    if (botHp <= 0 || playerHp <= 0) {
-      _endMatch(emit);
-      return;
-    }
-
-    if (effect == MissionEffect.burn) _startBurn();
-
-    _refillUsedSlot(emit);
+    return state.copyWith(yourCompleted: completed, yourFailed: failed);
   }
 
-  void _refillUsedSlot(Emitter<GameState> emit) {
-    final pool = _pool;
-    final index = state.activeMissionIndex;
-    if (pool == null || index == null) return;
+  GameState _withError(ErrorEvent error) {
+    if (error.isWaiting) {
+      return state.copyWith(connection: MatchLink.waitingForOpponent);
+    }
+    if (error.error == 'reconnect_failed') {
+      return state.copyWith(connection: MatchLink.lost);
+    }
+    return state;
+  }
 
-    emit(state.copyWith(phase: GamePhase.refill));
-    pool.replaceAt(index);
+  void _onConnectionChanged(ConnectionChanged event, Emitter<GameState> emit) {
+    if (!event.lost) return;
+    if (state.phase == GamePhase.ended) return;
 
     emit(state.copyWith(
-      phase: GamePhase.idle,
-      missions: pool.slots,
-      clearActiveMission: true,
-      objectiveIndex: 0,
-      results: const [],
+      connection: _socket.isReconnecting ? MatchLink.connecting : MatchLink.lost,
     ));
-    _startIdleTimer();
   }
 
-  void _onRefillTick(RefillTick event, Emitter<GameState> emit) {
-    final pool = _pool;
-    if (pool == null || state.phase != GamePhase.idle) return;
-
-    pool.replaceOldest();
-    emit(state.copyWith(missions: pool.slots));
-  }
-
-  void _onStunExpired(StunExpired event, Emitter<GameState> emit) {
-    emit(state.copyWith(clearStun: true));
-  }
-
-  /// Burns the bot for one health per second (Game_Rule section 8.1).
-  void _onBurnTick(BurnTick event, Emitter<GameState> emit) {
-    final botHp = max(0, state.botHp - 1);
-    emit(state.copyWith(botHp: botHp));
-
-    if (botHp <= 0) {
-      _cancelBurnTimer();
-      _endMatch(emit);
-    }
-  }
-
-  static const burnTicks = 5;
-
-  void _startBurn() {
-    _cancelBurnTimer();
-    _burnTicksLeft = burnTicks;
-    _burnTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (isClosed) return;
-      add(const BurnTick());
-      if (--_burnTicksLeft <= 0) _cancelBurnTimer();
-    });
-  }
-
-  void _cancelBurnTimer() {
-    _burnTimer?.cancel();
-    _burnTimer = null;
-    _burnTicksLeft = 0;
-  }
-
-  /// Stops every clock and closes out the match.
-  void _endMatch(Emitter<GameState> emit) {
-    _cancelIdleTimer();
-    _cancelStunTimer();
-    _cancelBurnTimer();
-    emit(state.copyWith(phase: GamePhase.ended, clearActiveMission: true));
-  }
-
-  void _startIdleTimer() {
-    _cancelIdleTimer();
-    _idleTimer = Timer.periodic(idleRotation, (_) {
-      if (!isClosed) add(const RefillTick());
-    });
-  }
-
-  void _cancelIdleTimer() {
-    _idleTimer?.cancel();
-    _idleTimer = null;
-  }
-
-  void _startStunTimer(Duration duration) {
-    _cancelStunTimer();
-    _stunTimer = Timer(duration, () {
-      if (!isClosed) add(const StunExpired());
-    });
-  }
-
-  void _cancelStunTimer() {
-    _stunTimer?.cancel();
-    _stunTimer = null;
-  }
-
-  /// True while the idle rotation clock is running — asserted in tests.
-  bool get isIdleTimerActive => _idleTimer?.isActive ?? false;
-
-  /// True while the burn effect is still ticking — asserted in tests.
-  bool get isBurnTimerActive => _burnTimer?.isActive ?? false;
+  GamePhase _phaseFrom(String raw) => switch (raw) {
+        'race' => GamePhase.race,
+        'stance' => GamePhase.stance,
+        'resolving' => GamePhase.resolving,
+        'scoring' => GamePhase.scoring,
+        'ended' => GamePhase.ended,
+        _ => GamePhase.idle,
+      };
 
   @override
-  Future<void> close() {
-    _cancelIdleTimer();
-    _cancelStunTimer();
-    _cancelBurnTimer();
+  Future<void> close() async {
+    await _subscription.cancel();
+    await _socket.close();
     return super.close();
   }
 }

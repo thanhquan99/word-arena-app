@@ -1,22 +1,27 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
-import 'theme/arena_theme.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../content/models.dart';
 import '../game/bloc/game_bloc.dart';
 import '../game/bloc/game_event.dart';
 import '../game/bloc/game_state.dart';
-import '../game/logic/effects.dart';
 import '../net/api_client.dart';
-import 'widgets/hp_bar_widget.dart';
+import 'theme/arena_theme.dart';
 import 'widgets/arrange_words.dart';
 import 'widgets/ptt_button.dart';
 import 'widgets/select_answer.dart';
 
-/// Overlay shown while a mission is being played.
+/// Playing an open card (Game_Rule v2 §3.4).
+///
+/// Two rules shape this screen, and both are new in v2:
+///
+///  * **Every objective is on screen at once.** The player picks what to do
+///    first, skips what looks hard, and comes back to it. v1 marched through
+///    them in order.
+///  * **One clock for the whole card.** There is no per-objective timer any
+///    more — how the budget is spent is the player's business.
 class ResolveScreen extends StatefulWidget {
   const ResolveScreen({super.key, required this.api});
 
@@ -27,102 +32,98 @@ class ResolveScreen extends StatefulWidget {
 }
 
 class _ResolveScreenState extends State<ResolveScreen> {
-  Timer? _countdown;
+  /// Which objective the player is currently answering, if any.
+  String? _openObjectiveId;
+
+  Timer? _display;
   int _secondsLeft = 0;
-  String? _watchedObjectiveId;
 
   @override
-  void dispose() {
-    _countdown?.cancel();
-    super.dispose();
-  }
-
-  /// Restarts the clock whenever the objective changes.
-  void _syncCountdown(Objective objective, GameState state) {
-    if (_watchedObjectiveId == objective.id) return;
-    _watchedObjectiveId = objective.id;
-
-    _countdown?.cancel();
-
-    // Mercy rule (Game_Rule section 4): a player who is losing badly gets more
-    // time, on top of whatever the mission's own effect does.
-    final mercy = state.playerHp / GameState.maxHp < mercyThreshold;
-    setState(() => _secondsLeft = effectiveTimeLimit(
-          baseSeconds: objective.timeLimitSec,
-          effect: state.activeMission?.effect,
-          mercy: mercy,
-        ));
-
-    _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-      setState(() => _secondsLeft--);
-      if (_secondsLeft <= 0) {
-        timer.cancel();
-        context.read<GameBloc>().add(const ObjectiveTimedOut());
-      }
+  void initState() {
+    super.initState();
+    // A display-only ticker. The server owns the real clock and will settle the
+    // turn whether or not this widget is on screen.
+    _display = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
     });
   }
 
-  void _answer(String transcript) {
-    _countdown?.cancel();
-    context.read<GameBloc>().add(ObjectiveAnswered(transcript));
+  @override
+  void dispose() {
+    _display?.cancel();
+    super.dispose();
+  }
+
+  int _remaining(GameState state) {
+    final startedAt = state.cardStartedAt;
+    if (startedAt == null) return state.cardSeconds;
+
+    final elapsed = (DateTime.now().millisecondsSinceEpoch - startedAt) / 1000;
+    final left = (state.cardSeconds - elapsed).ceil();
+    return left > 0 ? left : 0;
+  }
+
+  void _answer(GameState state, String objectiveId, String transcript) {
+    context
+        .read<GameBloc>()
+        .add(ObjectiveAnswered(objectiveId: objectiveId, transcript: transcript));
+    setState(() => _openObjectiveId = null);
   }
 
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<GameBloc, GameState>(
       builder: (context, state) {
-        final mission = state.activeMission;
-        final objective = state.activeObjective;
-        if (mission == null || objective == null) {
+        final mission = state.openedMission;
+        if (mission == null || state.phase != GamePhase.resolving) {
           return const SizedBox.shrink();
         }
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncCountdown(objective, state);
-        });
+        _secondsLeft = _remaining(state);
+        final open = _openObjectiveId == null
+            ? null
+            : state.objectives.where((o) => o.id == _openObjectiveId).firstOrNull;
 
-        return Container(
-          color: Arena.bg.withValues(alpha: 0.95),
-          padding: const EdgeInsets.all(20),
+        return Material(
+          color: Arena.surface.withValues(alpha: 0.97),
           child: SafeArea(
-            child: Column(
-              children: [
-                _ProgressDots(state: state),
-                const SizedBox(height: 16),
-                Text(
-                  mission.prompt,
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Arena.ink,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _CardClock(secondsLeft: _secondsLeft, total: state.cardSeconds),
+                  const SizedBox(height: 12),
+                  Text(
+                    mission.prompt,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+                    textAlign: TextAlign.center,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$_secondsLeft s',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: _secondsLeft <= 3 ? Arena.enemy : Arena.inkSoft,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  objective.text,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 18, color: Arena.ink),
-                ),
-                const Spacer(),
-                _AnswerInput(
-                  objective: objective,
-                  mission: mission,
-                  api: widget.api,
-                  onAnswer: _answer,
-                  // Silence locks the spoken objectives (Game_Rule section 8.2).
-                  silenced: mission.effect == MissionEffect.silence &&
-                      objective.needsMic,
-                ),
-              ],
+                  const SizedBox(height: 16),
+
+                  if (open == null)
+                    Expanded(
+                      child: _ObjectiveList(
+                        state: state,
+                        onPick: (objective) =>
+                            setState(() => _openObjectiveId = objective.id),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: _AnswerPanel(
+                        objective: open,
+                        mission: mission,
+                        api: widget.api,
+                        onAnswer: (transcript) => _answer(state, open.id, transcript),
+                        onBack: () => setState(() => _openObjectiveId = null),
+                      ),
+                    ),
+
+                  const SizedBox(height: 12),
+                  _DoneButton(state: state),
+                ],
+              ),
             ),
           ),
         );
@@ -131,29 +132,179 @@ class _ResolveScreenState extends State<ResolveScreen> {
   }
 }
 
-/// Picks the input for the objective's mode. Only `speak` and `listen` reach
-/// for the microphone.
-class _AnswerInput extends StatelessWidget {
-  const _AnswerInput({
+/// One clock for the card, counting the budget the server handed us.
+class _CardClock extends StatelessWidget {
+  const _CardClock({required this.secondsLeft, required this.total});
+
+  final int secondsLeft;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = total == 0 ? 0.0 : (secondsLeft / total).clamp(0.0, 1.0);
+    final urgent = secondsLeft <= 5;
+
+    return Column(
+      children: [
+        Text(
+          '$secondsLeft s',
+          style: TextStyle(
+            fontSize: 34,
+            fontWeight: FontWeight.w800,
+            color: urgent ? Arena.enemy : Arena.ink,
+          ),
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: fraction,
+            minHeight: 6,
+            backgroundColor: Arena.surface2,
+            valueColor: AlwaysStoppedAnimation(urgent ? Arena.enemy : Arena.accent),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Every objective, always visible, in whatever order the player wants them.
+class _ObjectiveList extends StatelessWidget {
+  const _ObjectiveList({required this.state, required this.onPick});
+
+  final GameState state;
+  final void Function(Objective) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      itemCount: state.objectives.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final objective = state.objectives[index];
+        final done = state.yourCompleted.contains(objective.id);
+        final failed = state.yourFailed.contains(objective.id);
+
+        return _ObjectiveTile(
+          objective: objective,
+          done: done,
+          failed: failed,
+          // A finished objective is settled; a failed one can still be retried
+          // while the card clock runs.
+          onTap: done || state.youAreDone ? null : () => onPick(objective),
+        );
+      },
+    );
+  }
+}
+
+class _ObjectiveTile extends StatelessWidget {
+  const _ObjectiveTile({
+    required this.objective,
+    required this.done,
+    required this.failed,
+    required this.onTap,
+  });
+
+  final Objective objective;
+  final bool done;
+  final bool failed;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, colour) = switch ((done, failed)) {
+      (true, _) => (Icons.check_circle, Arena.self),
+      (_, true) => (Icons.cancel, Arena.enemy),
+      _ => (Icons.radio_button_unchecked, Arena.inkSoft),
+    };
+
+    return Semantics(
+      button: onTap != null,
+      label: objective.text,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: done ? Arena.self.withValues(alpha: 0.12) : Arena.surface2,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colour.withValues(alpha: 0.5), width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: colour, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  objective.text,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: done ? Arena.inkSoft : Arena.ink,
+                    decoration: done ? TextDecoration.lineThrough : null,
+                  ),
+                ),
+              ),
+              Icon(
+                objective.needsMic ? Icons.mic : Icons.touch_app,
+                size: 18,
+                color: Arena.inkSoft,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The input for one objective, plus a way back to the list.
+class _AnswerPanel extends StatelessWidget {
+  const _AnswerPanel({
     required this.objective,
     required this.mission,
     required this.api,
     required this.onAnswer,
-    required this.silenced,
+    required this.onBack,
   });
 
   final Objective objective;
   final Mission mission;
   final ApiClient api;
   final void Function(String) onAnswer;
-
-  /// True when `silence` has locked this objective.
-  final bool silenced;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
-    if (silenced) return _SilencedNotice(onExpired: () => onAnswer(''));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: onBack,
+            icon: const Icon(Icons.arrow_back, size: 18),
+            // Leaving costs nothing but the seconds already spent — the
+            // objective stays open for another try.
+            label: const Text('Chọn objective khác'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          objective.text,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center,
+        ),
+        const Spacer(),
+        _input(),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
+  Widget _input() {
     switch (objective.mode) {
       case ObjectiveMode.select:
         return SelectAnswer(prompt: mission.prompt, onSelected: onAnswer);
@@ -166,93 +317,39 @@ class _AnswerInput extends StatelessWidget {
   }
 }
 
-/// One dot per objective: grey while the grade is outstanding, then green or
-/// red when it lands.
-class _ProgressDots extends StatelessWidget {
-  const _ProgressDots({required this.state});
+/// Locks in `completedTime` without waiting out the clock.
+///
+/// Without this button the §7.2 tie-break has nothing to compare: two players
+/// who both sweep the card would be separated by whoever's clock happened to
+/// expire first, which is not a skill.
+class _DoneButton extends StatelessWidget {
+  const _DoneButton({required this.state});
 
   final GameState state;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < state.results.length; i++)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: switch (state.results[i]) {
-                  null => i < state.objectiveIndex
-                      ? Arena.inkSoft // answered, still grading
-                      : Arena.surface2, // not reached yet
-                  final r when r.passed => Arena.self,
-                  _ => Arena.enemy,
-                },
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
+    final swept = state.yourCompleted.length == state.objectives.length;
 
-/// Shown when `silence` has locked a spoken objective.
-///
-/// It expires on its own rather than waiting for the objective clock: there is
-/// nothing to do here, and leaving the player staring at a dead screen for the
-/// full limit would just be a pause.
-class _SilencedNotice extends StatefulWidget {
-  const _SilencedNotice({required this.onExpired});
+    if (state.youAreDone) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 14),
+        child: Text(
+          'Đã chốt — chờ đối thủ',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Arena.inkSoft),
+        ),
+      );
+    }
 
-  final VoidCallback onExpired;
-
-  @override
-  State<_SilencedNotice> createState() => _SilencedNoticeState();
-}
-
-class _SilencedNoticeState extends State<_SilencedNotice> {
-  static const _pause = Duration(seconds: 2);
-
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(_pause, () {
-      if (mounted) widget.onExpired();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Arena.enemy.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Arena.enemy, width: Arena.borderWSm),
-      ),
-      child: const Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('🔇', style: TextStyle(fontSize: 40)),
-          SizedBox(height: 8),
-          Text(
-            'Bị khoá — không nói được objective này',
-            style: TextStyle(fontSize: 15, color: Arena.ink),
-          ),
-        ],
+    return FilledButton.icon(
+      onPressed: () => context.read<GameBloc>().add(const TurnFinished()),
+      icon: const Icon(Icons.flag),
+      label: Text(swept ? 'Xong — chốt thời gian' : 'Xong (bỏ phần còn lại)'),
+      style: FilledButton.styleFrom(
+        backgroundColor: swept ? Arena.self : Arena.surface2,
+        foregroundColor: swept ? Colors.white : Arena.inkSoft,
+        padding: const EdgeInsets.symmetric(vertical: 16),
       ),
     );
   }

@@ -41,9 +41,11 @@ GameState _state({
 }) =>
     GameState(
       phase: phase,
-      missions: missions ?? [for (var i = 0; i < 5; i++) _mission('m$i')],
-      playerHp: playerHp,
-      botHp: botHp,
+      slots: missions ?? [for (var i = 0; i < 4; i++) _mission('m$i')],
+      yourHp: playerHp,
+      opponentHp: botHp,
+      // Taps only reach the bloc once the socket is up (§3.2 is server-run).
+      connection: MatchLink.ready,
     );
 
 Widget _host(GameState state, {void Function(int)? onTap}) => MaterialApp(
@@ -59,7 +61,7 @@ void main() {
   testWidgets('renders one card per mission slot', (tester) async {
     await tester.pumpWidget(_host(_state()));
 
-    expect(find.byType(MissionCardWidget), findsNWidgets(5));
+    expect(find.byType(MissionCardWidget), findsNWidgets(4));
   });
 
   testWidgets('shows both health bars', (tester) async {
@@ -100,7 +102,7 @@ void main() {
     // fixed-size Flame rectangle.
     const long = 'often / she / to / goes / the / gym';
     await tester.pumpWidget(_host(_state(
-      missions: [for (var i = 0; i < 5; i++) _mission('m$i', prompt: long)],
+      missions: [for (var i = 0; i < 4; i++) _mission('m$i', prompt: long)],
     )));
 
     // A widget test fails on overflow, so reaching this point is the assertion.
@@ -114,12 +116,12 @@ void main() {
     await tester.pumpWidget(_host(_state(
       missions: [
         _mission('a', objectives: 4),
-        for (var i = 1; i < 5; i++) _mission('m$i', objectives: 2),
+        for (var i = 1; i < 4; i++) _mission('m$i', objectives: 2),
       ],
     )));
 
-    // 4 + (4 slots x 2) = 12 swords on the board.
-    expect(find.text('⚔️'), findsNWidgets(12));
+    // 4 + (3 slots x 2) = 10 swords on a four-card board.
+    expect(find.text('⚔️'), findsNWidgets(10));
   });
 
   testWidgets('a plain mission shows no effect badge', (tester) async {
@@ -135,7 +137,7 @@ void main() {
     await tester.pumpWidget(_host(_state(
       missions: [
         _mission('a', tier: 4, effect: MissionEffect.gamble),
-        for (var i = 1; i < 5; i++) _mission('m$i'),
+        for (var i = 1; i < 4; i++) _mission('m$i'),
       ],
     )));
 
@@ -143,16 +145,19 @@ void main() {
     expect(find.text(effectInfo(MissionEffect.gamble).label), findsOneWidget);
   });
 
-  testWidgets('an effect that needs an opponent says so in its tooltip',
+  testWidgets('an effect explains itself before the card is tapped',
       (tester) async {
+    // Every effect works for real since feature-05, so the tooltip teaches the
+    // rule rather than apologising for a missing opponent.
     await tester.pumpWidget(_host(_state(
       missions: [
-        _mission('a', effect: MissionEffect.duel),
-        for (var i = 1; i < 5; i++) _mission('m$i'),
+        _mission('a', effect: MissionEffect.allOut),
+        for (var i = 1; i < 4; i++) _mission('m$i'),
       ],
     )));
 
     final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
-    expect(tooltip.message, contains('Chưa có tác dụng'));
+    expect(tooltip.message, contains('Khô máu'));
+    expect(tooltip.message, contains('Cấm phòng thủ'));
   });
 }

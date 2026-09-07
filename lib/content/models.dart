@@ -32,20 +32,27 @@ enum ObjectiveMode { speak, select, arrange, listen }
 ///
 /// `doubleDamage` rather than `double` because `double` is a Dart keyword; its
 /// JSON spelling stays `"double"` to match the rules doc.
+/// The eleven effects of Game_Rule v2 §8.
+///
+/// Gone since v1: `silence` (locking the mic blocks the game's main input
+/// rather than challenging it) and `coop` (no winner means no decision).
+/// `duel` became the baseline ⚔️ vs ⚔️ rule, and its icon now belongs to
+/// `allOut` — the card that bans Defense and lets both sides deal damage.
 enum MissionEffect {
+  // §8.1 — good for yourself
   heal,
   doubleDamage,
-  shield,
-  burn,
-  reveal,
-  haste,
-  stun,
   gamble,
+  shield,
   mirror,
-  silence,
+  haste,
+  reveal,
+  // §8.2 — bad for the opponent
+  burn,
   rush,
-  coop,
-  duel,
+  stun,
+  // §8.3 — changes the whole turn
+  allOut,
 }
 
 /// Parse an enum from its snake_case JSON spelling.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:word_arena/content/models.dart';
 import 'package:word_arena/game/bloc/game_state.dart';
+import 'package:word_arena/net/protocol.dart';
 import 'package:word_arena/pet/pet_atlas.dart';
 import 'package:word_arena/pet/pet_spec.dart';
 import 'package:word_arena/pet/pet_sprite_painter.dart';
@@ -18,11 +19,23 @@ GameState _state({
 }) =>
     GameState(
       phase: phase,
-      missions: const <Mission>[],
-      playerHp: playerHp,
-      botHp: botHp,
-      lastDamage: lastDamage,
-      stunUntil: stunUntil,
+      slots: const <Mission>[],
+      yourHp: playerHp,
+      opponentHp: botHp,
+      // Damage now travels inside the settled turn rather than as a loose
+      // field, so the fixture builds a minimal result carrying it.
+      lastTurn: lastDamage == null
+          ? null
+          : TurnSettledEvent(
+              outcome: TurnOutcome.youWin,
+              reason: TurnReason.count,
+              you: SideResult(n: 1, completedTime: 0, damageDealt: lastDamage),
+              opponent: const SideResult(n: 0, completedTime: 0, damageDealt: 0),
+              blocked: const [],
+            ),
+      yourStatus: PlayerStatus(
+        stunnedUntil: stunUntil?.millisecondsSinceEpoch,
+      ),
     );
 
 Widget _host(Widget child) => MaterialApp(

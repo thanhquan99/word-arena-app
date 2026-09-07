@@ -1,146 +1,199 @@
 import 'package:equatable/equatable.dart';
 
 import '../../content/models.dart';
-import '../../net/grade_result.dart';
+import '../../net/protocol.dart';
 
-/// Where the match currently is (Game_Rule section 3).
+/// Where the match is (Game_Rule v2 §3).
 ///
-/// `race` is absent: single-player has no opponent to race against, so a tap
-/// goes straight to `resolving`.
-enum GamePhase { idle, resolving, scoring, refill, ended }
+/// `race` and `stance` are new in v2. `refill` is gone: in v1 it was emitted
+/// and left within the same synchronous call, so it never described a state
+/// anything could observe.
+enum GamePhase { idle, race, stance, resolving, scoring, ended }
 
+/// What the client knows about the match.
+///
+/// Every field here is something the **server** said. The client computes no
+/// rules of its own — the one thing it derives is a countdown for display, and
+/// even that reads a deadline the server set.
 class GameState extends Equatable {
   const GameState({
     this.phase = GamePhase.idle,
-    this.missions = const [],
-    this.playerHp = maxHp,
-    this.botHp = maxHp,
-    this.activeMissionIndex,
-    this.objectiveIndex = 0,
-    this.results = const [],
-    this.stunUntil,
-    this.missStreak = 0,
-    this.lastDamage,
-    this.missedObjectives = const [],
-    this.shieldActive = false,
+    this.slots = const [],
+    this.openedSlotIndex,
+    this.openedMission,
+    this.objectives = const [],
+    this.yourCompleted = const {},
+    this.opponentCompleted = const {},
+    this.yourFailed = const {},
+    this.yourStance,
+    this.opponentStance,
+    this.defenseAllowed = true,
+    this.stanceDeadline,
+    this.cardSeconds = 0,
+    this.cardStartedAt,
+    this.youAreDone = false,
+    this.yourHp = maxHp,
+    this.opponentHp = maxHp,
+    this.yourStatus = const PlayerStatus(),
+    this.opponentStatus = const PlayerStatus(),
+    this.lastTurn,
+    this.winner,
+    this.connection = MatchLink.disconnected,
+    this.isBot = false,
   });
 
   static const maxHp = 50;
 
   final GamePhase phase;
 
-  /// The five slots on the map.
-  final List<Mission> missions;
+  /// The four cards on the board (§2).
+  final List<Mission> slots;
 
-  final int playerHp;
-  final int botHp;
+  final int? openedSlotIndex;
+  final Mission? openedMission;
 
-  /// Which slot is being played, if any.
-  final int? activeMissionIndex;
+  /// Every objective of the open card, shown at once so the player picks their
+  /// own order (§3.4).
+  final List<Objective> objectives;
 
-  /// Position within the active mission's objectives.
-  final int objectiveIndex;
+  final Set<String> yourCompleted;
 
-  /// One entry per objective of the active mission. `null` means the grade has
-  /// been requested but has not come back yet — grading runs alongside play
-  /// rather than blocking it.
-  final List<GradeResult?> results;
+  /// The opponent's progress, needed to explain §7.3 blocking after the fact.
+  final Set<String> opponentCompleted;
 
-  /// When the player can act again. Null when not stunned.
-  final DateTime? stunUntil;
+  /// Objectives we answered and got wrong — still retryable while the clock runs.
+  final Set<String> yourFailed;
 
-  /// Consecutive missions where nothing was completed.
-  final int missStreak;
+  final Stance? yourStance;
+  final Stance? opponentStance;
 
-  /// Damage from the mission that just resolved, for the floating number.
-  final double? lastDamage;
+  /// False on a 🎯 All-out card, which bans Defense (§8.3).
+  final bool defenseAllowed;
+  final int? stanceDeadline;
 
-  /// Objectives the player failed this match, shown in the end-of-match review.
-  final List<Objective> missedObjectives;
+  /// Our own card budget in seconds; the opponent's may differ.
+  final int cardSeconds;
 
-  /// Set by the `shield` effect: the next incoming hit is absorbed.
+  /// Server clock instant the card started, for the display countdown.
+  final int? cardStartedAt;
+  final bool youAreDone;
+
+  final int yourHp;
+  final int opponentHp;
+
+  final PlayerStatus yourStatus;
+  final PlayerStatus opponentStatus;
+
+  final TurnSettledEvent? lastTurn;
+
+  /// `you`, `opponent` or `draw` once the match is over.
+  final String? winner;
+
+  final MatchLink connection;
+  final bool isBot;
+
+  bool get hasOpenCard => openedMission != null;
+
+  /// Whether tapping a card should do anything right now.
   ///
-  /// Nothing sets it back to false yet, because in a single-player match the
-  /// bot never attacks. The flag is here so the realtime feature has it
-  /// already; it is not a bug that it stays on.
-  final bool shieldActive;
+  /// The stun lockout (§8.2) is deliberately *not* checked here — it is a
+  /// server rule, and the server simply ignores a tap it does not accept. The
+  /// client greys the cards to explain, using [stunSecondsLeft].
+  bool get canTap => phase == GamePhase.idle && connection == MatchLink.ready;
 
-  Mission? get activeMission =>
-      activeMissionIndex == null ? null : missions[activeMissionIndex!];
-
-  Objective? get activeObjective {
-    final mission = activeMission;
-    if (mission == null || objectiveIndex >= mission.objectives.length) {
-      return null;
-    }
-    return mission.objectives[objectiveIndex];
-  }
-
-  bool get isStunned =>
-      stunUntil != null && DateTime.now().isBefore(stunUntil!);
-
-  /// True once every requested grade has come back.
-  bool get allGradesIn => !results.contains(null);
-
-  int get completedCount =>
-      results.where((r) => r?.passed ?? false).length;
-
-  /// Average grade weight across the objectives that passed, used as the
-  /// `gradeMul` term in the damage formula.
-  double get averageMultiplier {
-    final graded = results.whereType<GradeResult>().toList();
-    if (graded.isEmpty) return 0;
-    final sum = graded.fold<double>(0, (acc, r) => acc + r.multiplier);
-    return sum / graded.length;
+  /// Seconds of stun lockout left, or zero. Display only.
+  int stunSecondsLeft(int nowMs) {
+    final until = yourStatus.stunnedUntil;
+    if (until == null) return 0;
+    final left = ((until - nowMs) / 1000).ceil();
+    return left > 0 ? left : 0;
   }
 
   GameState copyWith({
     GamePhase? phase,
-    List<Mission>? missions,
-    int? playerHp,
-    int? botHp,
-    int? activeMissionIndex,
-    bool clearActiveMission = false,
-    int? objectiveIndex,
-    List<GradeResult?>? results,
-    DateTime? stunUntil,
-    bool clearStun = false,
-    int? missStreak,
-    double? lastDamage,
-    bool clearLastDamage = false,
-    List<Objective>? missedObjectives,
-    bool? shieldActive,
+    List<Mission>? slots,
+    int? openedSlotIndex,
+    Mission? openedMission,
+    List<Objective>? objectives,
+    Set<String>? yourCompleted,
+    Set<String>? opponentCompleted,
+    Set<String>? yourFailed,
+    Stance? yourStance,
+    Stance? opponentStance,
+    bool? defenseAllowed,
+    int? stanceDeadline,
+    int? cardSeconds,
+    int? cardStartedAt,
+    bool? youAreDone,
+    int? yourHp,
+    int? opponentHp,
+    PlayerStatus? yourStatus,
+    PlayerStatus? opponentStatus,
+    TurnSettledEvent? lastTurn,
+    String? winner,
+    MatchLink? connection,
+    bool? isBot,
+    bool clearCard = false,
+    bool clearLastTurn = false,
   }) {
     return GameState(
       phase: phase ?? this.phase,
-      missions: missions ?? this.missions,
-      playerHp: playerHp ?? this.playerHp,
-      botHp: botHp ?? this.botHp,
-      activeMissionIndex:
-          clearActiveMission ? null : (activeMissionIndex ?? this.activeMissionIndex),
-      objectiveIndex: objectiveIndex ?? this.objectiveIndex,
-      results: results ?? this.results,
-      stunUntil: clearStun ? null : (stunUntil ?? this.stunUntil),
-      missStreak: missStreak ?? this.missStreak,
-      lastDamage: clearLastDamage ? null : (lastDamage ?? this.lastDamage),
-      missedObjectives: missedObjectives ?? this.missedObjectives,
-      shieldActive: shieldActive ?? this.shieldActive,
+      slots: slots ?? this.slots,
+      openedSlotIndex: clearCard ? null : (openedSlotIndex ?? this.openedSlotIndex),
+      openedMission: clearCard ? null : (openedMission ?? this.openedMission),
+      objectives: clearCard ? const [] : (objectives ?? this.objectives),
+      yourCompleted: clearCard ? const {} : (yourCompleted ?? this.yourCompleted),
+      opponentCompleted:
+          clearCard ? const {} : (opponentCompleted ?? this.opponentCompleted),
+      yourFailed: clearCard ? const {} : (yourFailed ?? this.yourFailed),
+      yourStance: clearCard ? null : (yourStance ?? this.yourStance),
+      opponentStance: clearCard ? null : (opponentStance ?? this.opponentStance),
+      defenseAllowed: clearCard ? true : (defenseAllowed ?? this.defenseAllowed),
+      stanceDeadline: clearCard ? null : (stanceDeadline ?? this.stanceDeadline),
+      cardSeconds: clearCard ? 0 : (cardSeconds ?? this.cardSeconds),
+      cardStartedAt: clearCard ? null : (cardStartedAt ?? this.cardStartedAt),
+      youAreDone: clearCard ? false : (youAreDone ?? this.youAreDone),
+      yourHp: yourHp ?? this.yourHp,
+      opponentHp: opponentHp ?? this.opponentHp,
+      yourStatus: yourStatus ?? this.yourStatus,
+      opponentStatus: opponentStatus ?? this.opponentStatus,
+      lastTurn: clearLastTurn ? null : (lastTurn ?? this.lastTurn),
+      winner: winner ?? this.winner,
+      connection: connection ?? this.connection,
+      isBot: isBot ?? this.isBot,
     );
   }
 
   @override
   List<Object?> get props => [
         phase,
-        missions,
-        playerHp,
-        botHp,
-        activeMissionIndex,
-        objectiveIndex,
-        results,
-        stunUntil,
-        missStreak,
-        lastDamage,
-        missedObjectives,
-        shieldActive,
+        slots,
+        openedSlotIndex,
+        openedMission,
+        objectives,
+        yourCompleted,
+        opponentCompleted,
+        yourFailed,
+        yourStance,
+        opponentStance,
+        defenseAllowed,
+        stanceDeadline,
+        cardSeconds,
+        cardStartedAt,
+        youAreDone,
+        yourHp,
+        opponentHp,
+        yourStatus,
+        opponentStatus,
+        lastTurn,
+        winner,
+        connection,
+        isBot,
       ];
 }
+
+/// Where the socket stands, so the UI can say "reconnecting" rather than freeze.
+///
+/// Named `MatchLink` rather than `ConnectionState` because Flutter already
+/// exports that name from `async.dart`, and the clash reaches every widget.
+enum MatchLink { disconnected, connecting, waitingForOpponent, ready, lost }

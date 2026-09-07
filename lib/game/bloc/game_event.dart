@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-import '../../net/grade_result.dart';
+import '../../net/protocol.dart';
 
 sealed class GameEvent extends Equatable {
   const GameEvent();
@@ -9,56 +9,70 @@ sealed class GameEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-/// Load content and deal the first five missions.
-class GameStarted extends GameEvent {
-  const GameStarted();
+// ------------------------------------------------------------ player intent
+
+/// Connect and ask for a seat.
+class MatchJoined extends GameEvent {
+  const MatchJoined({this.mode = MatchMode.bot, this.level = 'B1'});
+
+  final MatchMode mode;
+  final String level;
+
+  @override
+  List<Object?> get props => [mode, level];
 }
 
-/// The player picked a mission from the map.
-class MissionTapped extends GameEvent {
-  const MissionTapped(this.slotIndex);
+/// The player tapped a card on the board (§3.2).
+class CardTapped extends GameEvent {
+  const CardTapped(this.slotIndex);
   final int slotIndex;
 
   @override
   List<Object?> get props => [slotIndex];
 }
 
-/// The player answered the current objective. The grade is requested in the
-/// background; play moves on immediately.
+/// The player picked ⚔️ or 🛡️ (§3.3).
+class StanceChosen extends GameEvent {
+  const StanceChosen(this.stance);
+  final Stance stance;
+
+  @override
+  List<Object?> get props => [stance];
+}
+
+/// The player answered one objective. They pick the order (§3.4), so which
+/// objective it was has to travel with the answer.
 class ObjectiveAnswered extends GameEvent {
-  const ObjectiveAnswered(this.transcript);
+  const ObjectiveAnswered({required this.objectiveId, required this.transcript});
+
+  final String objectiveId;
   final String transcript;
 
   @override
-  List<Object?> get props => [transcript];
+  List<Object?> get props => [objectiveId, transcript];
 }
 
-/// The clock ran out on the current objective.
-class ObjectiveTimedOut extends GameEvent {
-  const ObjectiveTimedOut();
+/// The player pressed Done, locking in `completedTime` early (§7.2).
+class TurnFinished extends GameEvent {
+  const TurnFinished();
 }
 
-/// A grade arrived — possibly long after the player moved past that objective.
-class GradeReceived extends GameEvent {
-  const GradeReceived({required this.objectiveIndex, required this.result});
-  final int objectiveIndex;
-  final GradeResult result;
+// ------------------------------------------------------- from the server
+
+/// A frame arrived. The bloc translates it into state; it decides nothing.
+class ServerEventReceived extends GameEvent {
+  const ServerEventReceived(this.event);
+  final ServerEvent event;
 
   @override
-  List<Object?> get props => [objectiveIndex, result.passed, result.multiplier];
+  List<Object?> get props => [event];
 }
 
-/// Five seconds passed with nobody picking a mission: rotate the oldest slot.
-class RefillTick extends GameEvent {
-  const RefillTick();
-}
+/// The socket dropped and is retrying, or has given up (§11).
+class ConnectionChanged extends GameEvent {
+  const ConnectionChanged(this.lost);
+  final bool lost;
 
-/// The stun wore off.
-class StunExpired extends GameEvent {
-  const StunExpired();
-}
-
-/// One second of the `burn` effect elapsed.
-class BurnTick extends GameEvent {
-  const BurnTick();
+  @override
+  List<Object?> get props => [lost];
 }

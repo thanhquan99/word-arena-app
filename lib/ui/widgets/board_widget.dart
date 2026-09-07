@@ -7,6 +7,7 @@ import '../theme/arena_theme.dart';
 import 'damage_number.dart';
 import 'effect_layer.dart';
 import 'hp_bar_widget.dart';
+import 'status_bar.dart';
 import 'mission_card_widget.dart';
 import 'pet_corner.dart';
 
@@ -61,7 +62,9 @@ class _BoardWidgetState extends State<BoardWidget> {
   }
 
   void _syncDamage() {
-    final damage = widget.state.lastDamage;
+    // The floating number shows what *we* dealt this turn. A turn we lost deals
+    // nothing (§7.2 is winner-takes-all), so nothing floats.
+    final damage = widget.state.lastTurn?.you.damageDealt;
     if (damage == null || damage <= 0 || damage == _shownDamage) return;
     _shownDamage = damage;
     // initState runs during build, so defer the setState that shows the number.
@@ -77,7 +80,10 @@ class _BoardWidgetState extends State<BoardWidget> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
-    final interactive = state.phase == GamePhase.idle && !state.isStunned;
+    // The server refuses taps from a stunned player anyway (§8.2); greying
+    // the cards is how the client explains why.
+    final stunned = state.stunSecondsLeft(DateTime.now().millisecondsSinceEpoch) > 0;
+    final interactive = state.canTap && !stunned;
 
     return Container(
       // The warm ground of Direction A. The generated pet sprites are drawn
@@ -107,16 +113,17 @@ class _BoardWidgetState extends State<BoardWidget> {
                     ),
                     bar: HpBarWidget(
                       label: 'Bạn',
-                      hp: state.playerHp,
+                      hp: state.yourHp,
                       maxHp: GameState.maxHp,
                       baseColor: Arena.self,
                     ),
+                    status: StatusBar(status: state.yourStatus, label: 'của bạn'),
                   ),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: _MissionGrid(
-                        missions: state.missions,
+                        missions: state.slots,
                         enabled: interactive,
                         onTap: widget.onMissionTapped,
                       ),
@@ -130,10 +137,11 @@ class _BoardWidgetState extends State<BoardWidget> {
                     ),
                     bar: HpBarWidget(
                       label: 'Đối thủ',
-                      hp: state.botHp,
+                      hp: state.opponentHp,
                       maxHp: GameState.maxHp,
                       baseColor: Arena.enemy,
                     ),
+                    status: StatusBar(status: state.opponentStatus, label: 'đối thủ'),
                   ),
                 ],
               ),
@@ -179,10 +187,13 @@ class _BoardWidgetState extends State<BoardWidget> {
 /// height of the board — putting the pet beside one would eat into the mission
 /// grid, which is the part players actually aim at.
 class _Flank extends StatelessWidget {
-  const _Flank({required this.pet, required this.bar});
+  const _Flank({required this.pet, required this.bar, required this.status});
 
   final Widget pet;
   final Widget bar;
+
+  /// Carried effects (§8). Empty most turns, so it takes no space by default.
+  final Widget status;
 
   /// Width of the pet column. The health bar is 34px, so this trades 22px of
   /// mission-grid width per side for a sprite that reads as a creature rather
@@ -198,7 +209,9 @@ class _Flank extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox.square(dimension: _width, child: pet),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
+          status,
+          const SizedBox(height: 4),
           Expanded(child: Center(child: bar)),
         ],
       ),
@@ -240,22 +253,14 @@ class _MissionGrid extends StatelessWidget {
           ),
         );
 
+    // Four cards on an even 2x2 grid (Game_Rule v2 §2). The old five-card
+    // board needed a 2-2-1 shape with one card stranded at half width; four
+    // divides cleanly, which is the whole reason the count changed.
     return Column(
       children: [
         row([0, 1]),
         const SizedBox(height: 10),
         row([2, 3]),
-        const SizedBox(height: 10),
-        // The heavy mission sits alone, half width, centred.
-        Expanded(
-          child: Row(
-            children: [
-              const Spacer(),
-              Expanded(flex: 2, child: card(4)),
-              const Spacer(),
-            ],
-          ),
-        ),
       ],
     );
   }

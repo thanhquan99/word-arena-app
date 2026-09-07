@@ -1,23 +1,34 @@
-/// Mission effects (Game_Rule section 8).
+/// Mission effects (Game_Rule v2 §8) — presentation only.
 ///
-/// Pure logic and presentation data — no bloc, no widgets — so the balance can
-/// be tested without running the game.
+/// The rules themselves now live on the server, in
+/// `word-arena-api/src/game/rules/effects.ts`. What is left here is what the
+/// player needs to read off a card before tapping it: an icon, a name, and a
+/// sentence explaining the gamble.
 library;
 
 import '../../content/models.dart';
 
-/// Which side of the risk/reward line an effect sits on. Drives the badge
-/// colour, so the player can read the gamble before tapping.
-enum EffectKind { good, risky, special }
+/// Who an effect aims at — Game_Rule v2 §8 groups the table this way, and the
+/// badge colour follows it, so the player can read the gamble before tapping.
+enum EffectGroup {
+  /// Good for the winner themselves.
+  self,
 
-/// Everything the game needs to know about one effect.
+  /// Bad for whoever loses the turn.
+  opponent,
+
+  /// Changes the rules of the turn for both sides.
+  turn,
+}
+
+/// Everything the UI needs to know about one effect.
 class EffectInfo {
   const EffectInfo({
     required this.icon,
     required this.label,
     required this.description,
-    required this.kind,
-    this.isImplemented = true,
+    required this.group,
+    this.bridges = false,
   });
 
   /// The emoji from the rules doc. Players recognise these, and unlike the
@@ -26,161 +37,103 @@ class EffectInfo {
 
   final String label;
 
-  /// Shown in the card's tooltip. Without it thirteen icons are thirteen
-  /// riddles.
+  /// Shown in the card's tooltip. Without it eleven icons are eleven riddles.
   final String description;
 
-  final EffectKind kind;
+  final EffectGroup group;
 
-  /// False for effects that need a real opponent. They still show their icon
-  /// and say so in the tooltip; they simply do nothing in a single-player
-  /// match. Waiting on the realtime feature, not forgotten.
-  final bool isImplemented;
+  /// True for effects that only take hold on the *next* turn (§8): the winner
+  /// is not under attack, so a shield has nothing to stop yet.
+  final bool bridges;
 }
 
 /// Deliberately exhaustive with no `default`: a new [MissionEffect] without an
 /// entry here should fail to compile.
 EffectInfo effectInfo(MissionEffect effect) => switch (effect) {
+      // ------------------------------------------------- §8.1 good for yourself
       MissionEffect.heal => const EffectInfo(
           icon: '💚',
           label: 'Heal',
-          description: 'Hoàn thành đủ tất cả objective → hồi 3 máu.',
-          kind: EffectKind.good,
+          description: 'Thắng lượt với đủ N/N objective → hồi 3 máu.',
+          group: EffectGroup.self,
         ),
       MissionEffect.doubleDamage => const EffectInfo(
           icon: '⚡',
           label: 'Double',
-          description: 'Sát thương nhân đôi.',
-          kind: EffectKind.good,
-        ),
-      MissionEffect.shield => const EffectInfo(
-          icon: '🛡️',
-          label: 'Shield',
-          description: 'Miễn nhiễm đòn đánh tiếp theo.',
-          kind: EffectKind.good,
-        ),
-      MissionEffect.burn => const EffectInfo(
-          icon: '🔥',
-          label: 'Burn',
-          description: 'Đối thủ mất thêm 1 máu mỗi giây trong 5 giây.',
-          kind: EffectKind.good,
-        ),
-      MissionEffect.reveal => const EffectInfo(
-          icon: '👁️',
-          label: 'Reveal',
-          description: 'Xem trước mission sắp tới. '
-              'Chưa có tác dụng ở chế độ 1 người.',
-          kind: EffectKind.good,
-          isImplemented: false,
-        ),
-      MissionEffect.haste => const EffectInfo(
-          icon: '⏱️',
-          label: 'Haste',
-          description: 'Thời gian làm mỗi objective tăng 50%.',
-          kind: EffectKind.good,
-        ),
-      MissionEffect.stun => const EffectInfo(
-          icon: '💀',
-          label: 'Stun',
-          description: 'Làm hụt hết → choáng 3 giây thay vì 1.5 giây.',
-          kind: EffectKind.risky,
+          description: 'Thắng lượt → damage nhân đôi.',
+          group: EffectGroup.self,
         ),
       MissionEffect.gamble => const EffectInfo(
           icon: '🎲',
           label: 'Gamble',
-          description: 'Đủ tất cả → sát thương nhân ba. '
-              'Thiếu một cái → không có sát thương nào.',
-          kind: EffectKind.risky,
+          description:
+              'Thắng lượt với đủ N/N → damage nhân ba. Thiếu dù một objective → '
+              '0 damage, thắng cũng như không.',
+          group: EffectGroup.self,
+        ),
+      MissionEffect.shield => const EffectInfo(
+          icon: '🛡️',
+          label: 'Shield',
+          description: 'Lượt kế tiếp, chặn trọn damage đánh vào mình.',
+          group: EffectGroup.self,
+          bridges: true,
         ),
       MissionEffect.mirror => const EffectInfo(
           icon: '🪞',
           label: 'Mirror',
-          description: 'Sát thương gây ra dội lại chính mình 50%.',
-          kind: EffectKind.risky,
+          description:
+              'Lượt kế tiếp, damage đối thủ đánh vào mình dội lại họ 50% — '
+              'mình vẫn ăn đủ.',
+          group: EffectGroup.self,
+          bridges: true,
         ),
-      MissionEffect.silence => const EffectInfo(
-          icon: '🔇',
-          label: 'Silence',
-          description: 'Các objective phải nói bị khoá.',
-          kind: EffectKind.risky,
+      MissionEffect.haste => const EffectInfo(
+          icon: '⏱️',
+          label: 'Haste',
+          description: 'Lượt kế tiếp, thời gian card của mình +50%.',
+          group: EffectGroup.self,
+          bridges: true,
+        ),
+      MissionEffect.reveal => const EffectInfo(
+          icon: '👁️',
+          label: 'Reveal',
+          description: 'Xem trước hai card sắp xuất hiện.',
+          group: EffectGroup.self,
+        ),
+
+      // ---------------------------------------------- §8.2 bad for the opponent
+      MissionEffect.burn => const EffectInfo(
+          icon: '🔥',
+          label: 'Burn',
+          description:
+              'Đối thủ mất 1 máu cuối mỗi lượt, kéo dài đúng bằng số objective '
+              'mình hoàn thành. Burn mới cộng thêm lượt, không tăng damage.',
+          group: EffectGroup.opponent,
         ),
       MissionEffect.rush => const EffectInfo(
           icon: '⏳',
           label: 'Rush',
-          description: 'Thời gian làm mỗi objective chỉ còn 60%.',
-          kind: EffectKind.risky,
+          description: 'Lượt kế tiếp, thời gian card của đối thủ chỉ còn 60%.',
+          group: EffectGroup.opponent,
+          bridges: true,
         ),
-      MissionEffect.coop => const EffectInfo(
-          icon: '🤝',
-          label: 'Co-op',
-          description: 'Cả hai cùng làm, cùng hồi máu. '
-              'Chưa có tác dụng ở chế độ 1 người.',
-          kind: EffectKind.special,
-          isImplemented: false,
+      MissionEffect.stun => const EffectInfo(
+          icon: '💀',
+          label: 'Stun',
+          description:
+              'Ở pha chọn card kế tiếp, đối thủ không bấm được trong số giây '
+              'bằng số objective mình hoàn thành.',
+          group: EffectGroup.opponent,
+          bridges: true,
         ),
-      MissionEffect.duel => const EffectInfo(
+
+      // ------------------------------------------- §8.3 changes the whole turn
+      MissionEffect.allOut => const EffectInfo(
           icon: '🎯',
-          label: 'Duel',
-          description: 'Cả hai cùng làm, chênh lệch điểm là sát thương. '
-              'Chưa có tác dụng ở chế độ 1 người.',
-          kind: EffectKind.special,
-          isImplemented: false,
+          label: 'Khô máu',
+          description:
+              'Cấm phòng thủ. Không so sánh gì cả — mỗi bên gây damage theo số '
+              'objective của mình, cả hai cùng chảy máu.',
+          group: EffectGroup.turn,
         ),
     };
-
-/// Risky effects are only allowed on tier 3 and above (Game_Rule section 8):
-/// playing safe should not be able to deal heavy damage.
-const minRiskyTier = 3;
-
-/// Effects that may be seeded onto a mission of [tier].
-///
-/// [isAllMic] drops `silence` from missions where every objective needs the
-/// microphone — locking those would leave nothing the player could answer.
-List<MissionEffect> effectsAllowedFor({
-  required int tier,
-  required bool isAllMic,
-}) {
-  return [
-    for (final effect in MissionEffect.values)
-      if (_isAllowed(effect, tier: tier, isAllMic: isAllMic)) effect,
-  ];
-}
-
-bool _isAllowed(
-  MissionEffect effect, {
-  required int tier,
-  required bool isAllMic,
-}) {
-  if (effect == MissionEffect.silence && isAllMic) return false;
-  if (effectInfo(effect).kind == EffectKind.risky && tier < minRiskyTier) {
-    return false;
-  }
-  return true;
-}
-
-/// Lower bound on an objective's time limit, so no combination of modifiers can
-/// leave a player with no time at all.
-const minObjectiveSeconds = 3;
-
-/// The time limit for one objective once every modifier is applied.
-///
-/// The modifiers multiply together — the rules doc does not say how they should
-/// combine, and stacking them keeps each one's stated effect intact. Mercy
-/// (Game_Rule section 4) applies on top of the mission's own effect.
-int effectiveTimeLimit({
-  required int baseSeconds,
-  required MissionEffect? effect,
-  required bool mercy,
-}) {
-  var seconds = baseSeconds.toDouble();
-
-  seconds *= switch (effect) {
-    MissionEffect.haste => 1.5,
-    MissionEffect.rush => 0.6,
-    _ => 1.0,
-  };
-
-  if (mercy) seconds *= 1.3;
-
-  return seconds.round().clamp(minObjectiveSeconds, 999);
-}

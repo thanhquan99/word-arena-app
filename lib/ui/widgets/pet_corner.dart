@@ -47,8 +47,8 @@ class _PetCornerState extends State<PetCorner> {
   @override
   void initState() {
     super.initState();
-    _lastSelfHp = widget.state.playerHp;
-    _lastEnemyHp = widget.state.botHp;
+    _lastSelfHp = widget.state.yourHp;
+    _lastEnemyHp = widget.state.opponentHp;
   }
 
   @override
@@ -59,14 +59,14 @@ class _PetCornerState extends State<PetCorner> {
 
   void _syncReaction() {
     final s = widget.state;
-    final damage = s.lastDamage;
+    final damage = s.lastTurn?.you.damageDealt;
 
-    // Track health so a later hit can be attributed even if lastDamage
+    // Track health so a later hit can be attributed even if the damage figure
     // repeats the same number.
-    final selfDropped = _lastSelfHp != null && s.playerHp < _lastSelfHp!;
-    final enemyDropped = _lastEnemyHp != null && s.botHp < _lastEnemyHp!;
-    _lastSelfHp = s.playerHp;
-    _lastEnemyHp = s.botHp;
+    final selfDropped = _lastSelfHp != null && s.yourHp < _lastSelfHp!;
+    final enemyDropped = _lastEnemyHp != null && s.opponentHp < _lastEnemyHp!;
+    _lastSelfHp = s.yourHp;
+    _lastEnemyHp = s.opponentHp;
 
     if (damage == null || damage <= 0) {
       _reactedTo = null;
@@ -95,7 +95,8 @@ class _PetCornerState extends State<PetCorner> {
     final s = widget.state;
 
     // Stunned reads as grounded, whichever side it is.
-    if (widget.isPlayer && s.isStunned) return PetPose.perch;
+    final stunned = s.stunSecondsLeft(DateTime.now().millisecondsSinceEpoch) > 0;
+    if (widget.isPlayer && stunned) return PetPose.perch;
 
     // The player is committed to a mission during resolving, so their pet
     // flies; the opponent's waits. Outside that both are at rest.
@@ -108,7 +109,7 @@ class _PetCornerState extends State<PetCorner> {
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
-    final dead = widget.isPlayer ? s.playerHp <= 0 : s.botHp <= 0;
+    final dead = widget.isPlayer ? s.yourHp <= 0 : s.opponentHp <= 0;
 
     return Opacity(
       // A defeated pet dims rather than vanishing: an empty slot reads as a
