@@ -91,20 +91,28 @@ void main() {
   });
 
   group('stance — §3.3', () {
-    test('an opened card moves to the stance phase for both players', () async {
+    /// Cards now open straight into play — the three-second stance window is
+    /// gone, so these drive the resolve phase directly.
+    Future<void> playing() async {
+      await joined();
+      channel.emit(_cardOpened());
+      await pump();
+      channel.emit(_resolveStart());
+      await pump();
+    }
+
+    test('an opened card lands in resolving with Attack already set', () async {
       await joined();
       channel.emit(_cardOpened());
       await pump();
 
-      expect(bloc.state.phase, GamePhase.stance);
       expect(bloc.state.openedMission, isNotNull);
       expect(bloc.state.objectives, hasLength(2));
+      expect(bloc.state.yourStance, Stance.attack);
     });
 
-    test('choosing a stance sends it and shows it immediately', () async {
-      await joined();
-      channel.emit(_cardOpened());
-      await pump();
+    test('switching to Defense sends it and shows it', () async {
+      await playing();
 
       bloc.add(const StanceChosen(Stance.defense));
       await pump();
@@ -113,27 +121,53 @@ void main() {
       expect(bloc.state.yourStance, Stance.defense);
     });
 
+    test('switching back is free', () async {
+      await playing();
+
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
+      bloc.add(const StanceChosen(Stance.attack));
+      await pump();
+
+      expect(bloc.state.yourStance, Stance.attack);
+    });
+
     test('Defense is refused on a 🎯 All-out card', () async {
       await joined();
       channel.emit(_cardOpened(defenseAllowed: false));
+      await pump();
+      channel.emit(_resolveStart());
       await pump();
 
       bloc.add(const StanceChosen(Stance.defense));
       await pump();
 
       expect(channel.sentTypes, isNot(contains('set_stance')));
-      expect(bloc.state.yourStance, isNull);
+      expect(bloc.state.yourStance, Stance.attack);
     });
 
-    test('the locked stances of both sides are recorded', () async {
-      await joined();
-      channel.emit(_cardOpened());
-      await pump();
-      channel.emit({'type': 'stance_locked', 'you': 'attack', 'opponent': 'defense'});
+    test('switching stops once you are done', () async {
+      await playing();
+      bloc.add(const TurnFinished());
       await pump();
 
+      final before = channel.sent.length;
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
+
+      expect(channel.sent.length, before);
       expect(bloc.state.yourStance, Stance.attack);
-      expect(bloc.state.opponentStance, Stance.defense);
+    });
+
+    test('the opponent switching tells us nothing about which way', () async {
+      await playing();
+      final before = bloc.state;
+
+      channel.emit({'type': 'stance_changed', 'changed': true});
+      await pump();
+
+      // Nothing to record — that is the point.
+      expect(bloc.state, before);
     });
   });
 
@@ -286,30 +320,17 @@ void main() {
       }
     });
 
-    test('opponent progress is a count, and the payload carries no objective',
-        () async {
+    test('opponent progress is a flag, not a count', () async {
       await joined();
-      channel.emit({
-        'type': 'opponent_progress',
-        'completed': 2,
-        'total': 4,
-        'done': false,
-      });
+      channel.emit({'type': 'opponent_progress', 'done': false});
       await pump();
 
-      expect(bloc.state.opponentProgress, 2);
-      expect(bloc.state.opponentTotal, 4);
       expect(bloc.state.opponentIsDone, isFalse);
     });
 
     test('the opponent pressing Done is visible', () async {
       await joined();
-      channel.emit({
-        'type': 'opponent_progress',
-        'completed': 3,
-        'total': 3,
-        'done': true,
-      });
+      channel.emit({'type': 'opponent_progress', 'done': true});
       await pump();
 
       expect(bloc.state.opponentIsDone, isTrue);
@@ -318,12 +339,7 @@ void main() {
     test('a new card wipes the previous turn pacing', () async {
       await joined();
       channel.emit({'type': 'turn_phase', 'stage': 'settle', 'until': 9000});
-      channel.emit({
-        'type': 'opponent_progress',
-        'completed': 3,
-        'total': 3,
-        'done': true,
-      });
+      channel.emit({'type': 'opponent_progress', 'done': true});
       await pump();
 
       channel.emit(_board());
@@ -331,7 +347,6 @@ void main() {
 
       expect(bloc.state.turnStage, isNull);
       expect(bloc.state.stageDeadline, isNull);
-      expect(bloc.state.opponentProgress, 0);
       expect(bloc.state.opponentIsDone, isFalse);
     });
   });
@@ -432,7 +447,6 @@ Map<String, dynamic> _cardOpened({bool defenseAllowed = true}) => {
       'slotIndex': 0,
       'mission': _mission('m0'),
       'defenseAllowed': defenseAllowed,
-      'stanceDeadline': DateTime.now().millisecondsSinceEpoch + 3000,
     };
 
 Map<String, dynamic> _resolveStart() => {

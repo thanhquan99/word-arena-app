@@ -182,14 +182,10 @@ final _everyEventType = <Map<String, dynamic>>[
     'protocolVersion': 1,
   },
   {'type': 'board', 'slots': <dynamic>[], 'phase': 'idle', 'idleDeadline': null},
-  {
-    'type': 'card_opened',
-    'slotIndex': 0,
-    'mission': _mission,
-    'defenseAllowed': true,
-    'stanceDeadline': 1,
-  },
-  {'type': 'stance_locked', 'you': 'attack', 'opponent': 'defense'},
+  {'type': 'card_opened', 'slotIndex': 0, 'mission': _mission, 'defenseAllowed': true},
+  {'type': 'stance_changed', 'changed': true},
+  {'type': 'turn_phase', 'stage': 'compare', 'until': 1},
+  {'type': 'opponent_progress', 'done': true},
   {
     'type': 'resolve_start',
     'objectives': _mission['objectives'],

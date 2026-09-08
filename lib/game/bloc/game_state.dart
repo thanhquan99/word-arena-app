@@ -5,10 +5,10 @@ import '../../net/protocol.dart';
 
 /// Where the match is (Game_Rule v2 §3).
 ///
-/// `race` and `stance` are new in v2. `refill` is gone: in v1 it was emitted
-/// and left within the same synchronous call, so it never described a state
-/// anything could observe.
-enum GamePhase { idle, race, stance, resolving, scoring, ended }
+/// `stance` is gone: choosing attack or defend used to be its own three-second
+/// phase before the objectives appeared. It is now a switch on the play screen,
+/// so a card opens straight into `resolving`.
+enum GamePhase { idle, race, resolving, scoring, ended }
 
 /// What the client knows about the match.
 ///
@@ -25,15 +25,11 @@ class GameState extends Equatable {
     this.yourCompleted = const {},
     this.opponentCompleted = const {},
     this.yourFailed = const {},
-    this.yourStance,
-    this.opponentStance,
+    this.yourStance = Stance.attack,
     this.defenseAllowed = true,
-    this.stanceDeadline,
     this.cardSeconds = 0,
     this.cardStartedAt,
     this.youAreDone = false,
-    this.opponentProgress = 0,
-    this.opponentTotal = 0,
     this.opponentIsDone = false,
     this.turnStage,
     this.stageDeadline,
@@ -69,12 +65,11 @@ class GameState extends Equatable {
   /// Objectives we answered and got wrong — still retryable while the clock runs.
   final Set<String> yourFailed;
 
-  final Stance? yourStance;
-  final Stance? opponentStance;
+  /// Attack from the moment the card opens, switchable while the clock runs.
+  final Stance yourStance;
 
   /// False on a 🎯 All-out card, which bans Defense (§8.3).
   final bool defenseAllowed;
-  final int? stanceDeadline;
 
   /// Our own card budget in seconds; the opponent's may differ.
   final int cardSeconds;
@@ -83,15 +78,11 @@ class GameState extends Equatable {
   final int? cardStartedAt;
   final bool youAreDone;
 
-  /// How many objectives the opponent has finished — a count only.
-  ///
-  /// The server deliberately withholds *which* ones until the turn settles:
-  /// §7.3 blocks per objective, so watching them live would replace the guess
-  /// that rule is built on. The breakdown arrives with [lastTurn].
-  final int opponentProgress;
-  final int opponentTotal;
-
   /// They have pressed Done and are waiting on you.
+  ///
+  /// Whether, not how far. §7.3 blocks per objective, so even a count would
+  /// tell a defender more than the rule intends; the breakdown arrives with
+  /// [lastTurn], once there is nothing left to exploit.
   final bool opponentIsDone;
 
   /// Which beat of the scoring phase is playing, or null outside it.
@@ -141,14 +132,10 @@ class GameState extends Equatable {
     Set<String>? opponentCompleted,
     Set<String>? yourFailed,
     Stance? yourStance,
-    Stance? opponentStance,
     bool? defenseAllowed,
-    int? stanceDeadline,
     int? cardSeconds,
     int? cardStartedAt,
     bool? youAreDone,
-    int? opponentProgress,
-    int? opponentTotal,
     bool? opponentIsDone,
     TurnStage? turnStage,
     int? stageDeadline,
@@ -173,15 +160,11 @@ class GameState extends Equatable {
       opponentCompleted:
           clearCard ? const {} : (opponentCompleted ?? this.opponentCompleted),
       yourFailed: clearCard ? const {} : (yourFailed ?? this.yourFailed),
-      yourStance: clearCard ? null : (yourStance ?? this.yourStance),
-      opponentStance: clearCard ? null : (opponentStance ?? this.opponentStance),
+      yourStance: clearCard ? Stance.attack : (yourStance ?? this.yourStance),
       defenseAllowed: clearCard ? true : (defenseAllowed ?? this.defenseAllowed),
-      stanceDeadline: clearCard ? null : (stanceDeadline ?? this.stanceDeadline),
       cardSeconds: clearCard ? 0 : (cardSeconds ?? this.cardSeconds),
       cardStartedAt: clearCard ? null : (cardStartedAt ?? this.cardStartedAt),
       youAreDone: clearCard ? false : (youAreDone ?? this.youAreDone),
-      opponentProgress: clearCard ? 0 : (opponentProgress ?? this.opponentProgress),
-      opponentTotal: clearCard ? 0 : (opponentTotal ?? this.opponentTotal),
       opponentIsDone: clearCard ? false : (opponentIsDone ?? this.opponentIsDone),
       turnStage: clearCard ? null : (turnStage ?? this.turnStage),
       stageDeadline: clearCard ? null : (stageDeadline ?? this.stageDeadline),
@@ -207,14 +190,10 @@ class GameState extends Equatable {
         opponentCompleted,
         yourFailed,
         yourStance,
-        opponentStance,
         defenseAllowed,
-        stanceDeadline,
         cardSeconds,
         cardStartedAt,
         youAreDone,
-        opponentProgress,
-        opponentTotal,
         opponentIsDone,
         turnStage,
         stageDeadline,

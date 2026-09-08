@@ -9,7 +9,6 @@ import '../net/match_socket.dart';
 import '../net/protocol.dart';
 import 'match_end_screen.dart';
 import 'resolve_screen.dart';
-import 'stance_overlay.dart';
 import 'theme/arena_theme.dart';
 import 'widgets/board_widget.dart';
 import 'widgets/turn_result_overlay.dart';
@@ -81,7 +80,6 @@ class _MatchScreenState extends State<MatchScreen> {
                   onMissionTapped: (index) => _bloc.add(CardTapped(index)),
                 ),
 
-                if (state.phase == GamePhase.stance) StanceOverlay(state: state),
                 if (state.phase == GamePhase.resolving) ResolveScreen(api: _api),
 
                 // The result is read during `compare`, then fades out over

@@ -135,7 +135,7 @@ sealed class ServerEvent {
       'matched' => MatchedEvent.fromJson(json),
       'board' => BoardEvent.fromJson(json),
       'card_opened' => CardOpenedEvent.fromJson(json),
-      'stance_locked' => StanceLockedEvent.fromJson(json),
+      'stance_changed' => StanceChangedEvent.fromJson(json),
       'resolve_start' => ResolveStartEvent.fromJson(json),
       'objective_result' => ObjectiveResultEvent.fromJson(json),
       'turn_settled' => TurnSettledEvent.fromJson(json),
@@ -197,7 +197,6 @@ class CardOpenedEvent extends ServerEvent {
     required this.slotIndex,
     required this.mission,
     required this.defenseAllowed,
-    this.stanceDeadline,
   });
 
   final int slotIndex;
@@ -205,26 +204,23 @@ class CardOpenedEvent extends ServerEvent {
 
   /// False on a 🎯 All-out card, which bans Defense (§8.3).
   final bool defenseAllowed;
-  final int? stanceDeadline;
 
   factory CardOpenedEvent.fromJson(Map<String, dynamic> json) => CardOpenedEvent(
         slotIndex: json['slotIndex'] as int,
         mission: Mission.fromJson(json['mission'] as Map<String, dynamic>),
         defenseAllowed: json['defenseAllowed'] as bool? ?? true,
-        stanceDeadline: json['stanceDeadline'] as int?,
       );
 }
 
-class StanceLockedEvent extends ServerEvent {
-  const StanceLockedEvent({required this.you, required this.opponent});
+/// The opponent switched stance — but not which way.
+///
+/// Seeing them flip to Defense would say as much about their plan as naming
+/// the objectives would, and §7.3 is built on not knowing.
+class StanceChangedEvent extends ServerEvent {
+  const StanceChangedEvent();
 
-  final Stance you;
-  final Stance opponent;
-
-  factory StanceLockedEvent.fromJson(Map<String, dynamic> json) => StanceLockedEvent(
-        you: _stance(json['you']),
-        opponent: _stance(json['opponent']),
-      );
+  factory StanceChangedEvent.fromJson(Map<String, dynamic> _) =>
+      const StanceChangedEvent();
 }
 
 class ResolveStartEvent extends ServerEvent {
@@ -336,31 +332,20 @@ class TurnPhaseEvent extends ServerEvent {
       );
 }
 
-/// How far along the opponent is — a count only.
+/// Whether the opponent has finished — nothing more.
 ///
-/// Deliberately carries no objective id. §7.3 blocks per objective, so seeing
-/// *which* one the opponent just finished would let a defender watch and block
-/// correctly rather than guess. The breakdown comes later, in the comparison
-/// table, once there is nothing left to exploit.
+/// Not a count, and certainly not which objectives: §7.3 blocks per objective,
+/// so anything finer would let a defender read the attack instead of guessing.
+/// The breakdown comes later, in the comparison table, once there is nothing
+/// left to exploit.
 class OpponentProgressEvent extends ServerEvent {
-  const OpponentProgressEvent({
-    required this.completed,
-    required this.total,
-    required this.done,
-  });
-
-  final int completed;
-  final int total;
+  const OpponentProgressEvent({required this.done});
 
   /// They have pressed Done and are waiting on you.
   final bool done;
 
   factory OpponentProgressEvent.fromJson(Map<String, dynamic> json) =>
-      OpponentProgressEvent(
-        completed: json['completed'] as int,
-        total: json['total'] as int,
-        done: json['done'] as bool? ?? false,
-      );
+      OpponentProgressEvent(done: json['done'] as bool? ?? false);
 }
 
 class HpEvent extends ServerEvent {
@@ -451,9 +436,6 @@ TurnStage _stage(Object? raw) => switch (raw) {
       'settle' => TurnStage.settle,
       _ => TurnStage.compare,
     };
-
-Stance _stance(Object? raw) =>
-    raw == 'defense' ? Stance.defense : Stance.attack;
 
 TurnOutcome _outcome(Object? raw) => switch (raw) {
       'you_win' => TurnOutcome.youWin,

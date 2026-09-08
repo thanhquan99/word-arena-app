@@ -197,39 +197,14 @@ void main() {
     });
   });
 
-  group('opponent progress — feature-06', () {
-    testWidgets('shows a count while you are still playing', (tester) async {
-      final m = mission();
-      bloc.emit(GameState(
-        phase: GamePhase.resolving,
-        slots: [m],
-        openedSlotIndex: 0,
-        openedMission: m,
-        objectives: m.objectives,
-        opponentProgress: 2,
-        opponentTotal: 3,
-        cardSeconds: 20,
-        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
-        connection: MatchLink.ready,
-      ));
-      await tester.pumpWidget(
-        MaterialApp(
-          home: BlocProvider.value(
-            value: bloc,
-            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
-          ),
-        ),
-      );
-      await tester.pump();
+  group('opponent status — feature-06', () {
+    testWidgets('says they are still working', (tester) async {
+      await show(tester, resolving());
 
-      expect(find.text('2/3'), findsOneWidget);
-      expect(find.text('Đối thủ'), findsOneWidget);
+      expect(find.text('Đối thủ đang làm…'), findsOneWidget);
     });
 
-    testWidgets('never names which objective the opponent finished',
-        (tester) async {
-      // §7.3 blocks per objective. Showing which one they just did would let a
-      // defender copy instead of guess, and half the rule would evaporate.
+    testWidgets('says when they have finished and are waiting', (tester) async {
       final m = mission();
       bloc.emit(GameState(
         phase: GamePhase.resolving,
@@ -237,39 +212,6 @@ void main() {
         openedSlotIndex: 0,
         openedMission: m,
         objectives: m.objectives,
-        opponentProgress: 2,
-        opponentTotal: 3,
-        opponentCompleted: const {'o1', 'o2'},
-        cardSeconds: 20,
-        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
-        connection: MatchLink.ready,
-      ));
-      await tester.pumpWidget(
-        MaterialApp(
-          home: BlocProvider.value(
-            value: bloc,
-            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
-          ),
-        ),
-      );
-      await tester.pump();
-
-      // Each objective appears exactly once — in our own list, not marked up
-      // with anything about the opponent.
-      expect(find.text('Objective number 1'), findsOneWidget);
-      expect(find.text('Objective number 2'), findsOneWidget);
-    });
-
-    testWidgets('shows when the opponent has finished', (tester) async {
-      final m = mission();
-      bloc.emit(GameState(
-        phase: GamePhase.resolving,
-        slots: [m],
-        openedSlotIndex: 0,
-        openedMission: m,
-        objectives: m.objectives,
-        opponentProgress: 3,
-        opponentTotal: 3,
         opponentIsDone: true,
         cardSeconds: 20,
         cardStartedAt: DateTime.now().millisecondsSinceEpoch,
@@ -285,7 +227,15 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('✓ đã xong'), findsOneWidget);
+      expect(find.text('Đối thủ đã xong — đang chờ bạn'), findsOneWidget);
+    });
+
+    testWidgets('never says how many they have finished', (tester) async {
+      // §7.3 blocks per objective. Even a count would let a defender read the
+      // attack instead of guessing at it.
+      await show(tester, resolving());
+
+      expect(find.textContaining('/'), findsNothing);
     });
 
     testWidgets('still visible after you press Done', (tester) async {
@@ -293,8 +243,65 @@ void main() {
       // grey text and nothing else moved.
       await show(tester, resolving(done: true));
 
-      expect(find.text('Đối thủ'), findsOneWidget);
+      expect(find.text('Đối thủ đang làm…'), findsOneWidget);
       expect(find.text('Đã chốt — chờ đối thủ'), findsOneWidget);
+    });
+  });
+
+  group('the stance switch — §3.3', () {
+    testWidgets('Attack is lit by default', (tester) async {
+      await show(tester, resolving());
+
+      expect(find.text('Tấn công'), findsOneWidget);
+      expect(find.text('Phòng thủ'), findsOneWidget);
+    });
+
+    testWidgets('tapping Defense sends the switch', (tester) async {
+      bloc.add(const MatchJoined(mode: MatchMode.bot));
+      await tester.pump();
+      await tester.pump();
+
+      await show(tester, resolving());
+      await tester.tap(find.text('Phòng thủ'));
+      await tester.pump();
+
+      expect(channel.sentTypes, contains('set_stance'));
+    });
+
+    testWidgets('a 🎯 All-out card says why Defense is unavailable',
+        (tester) async {
+      final m = mission();
+      bloc.emit(GameState(
+        phase: GamePhase.resolving,
+        slots: [m],
+        openedSlotIndex: 0,
+        openedMission: m,
+        objectives: m.objectives,
+        defenseAllowed: false,
+        cardSeconds: 20,
+        cardStartedAt: DateTime.now().millisecondsSinceEpoch,
+        connection: MatchLink.ready,
+      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(
+            value: bloc,
+            child: Scaffold(body: ResolveScreen(api: ApiClient(baseUrl: ''))),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Khô máu — cấm thủ'), findsOneWidget);
+    });
+
+    testWidgets('the switch is available the whole time the card runs',
+        (tester) async {
+      // Not a three-second window before the objectives were even readable.
+      await show(tester, resolving(completed: {'o1', 'o2'}));
+
+      expect(find.text('Tấn công'), findsOneWidget);
+      expect(find.text('Phòng thủ'), findsOneWidget);
     });
   });
 

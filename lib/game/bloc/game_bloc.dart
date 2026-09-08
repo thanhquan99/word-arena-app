@@ -53,7 +53,9 @@ class GameBloc extends Bloc<GameEvent, GameState> {
   }
 
   void _onStanceChosen(StanceChosen event, Emitter<GameState> emit) {
-    if (state.phase != GamePhase.stance) return;
+    // Switchable for as long as the card runs — it is a running choice, not a
+    // commitment made before the objectives were even readable.
+    if (state.phase != GamePhase.resolving || state.youAreDone) return;
     if (event.stance == Stance.defense && !state.defenseAllowed) return;
 
     _socket.setStance(event.stance);
@@ -88,24 +90,20 @@ class GameBloc extends Bloc<GameEvent, GameState> {
           clearCard: phase == 'idle',
         ));
 
-      case CardOpenedEvent(
-          :final slotIndex,
-          :final mission,
-          :final defenseAllowed,
-          :final stanceDeadline,
-        ):
+      case CardOpenedEvent(:final slotIndex, :final mission, :final defenseAllowed):
         emit(state.copyWith(
-          phase: GamePhase.stance,
           openedSlotIndex: slotIndex,
           openedMission: mission,
           objectives: mission.objectives,
           defenseAllowed: defenseAllowed,
-          stanceDeadline: stanceDeadline,
+          yourStance: Stance.attack,
           clearLastTurn: true,
         ));
 
-      case StanceLockedEvent(:final you, :final opponent):
-        emit(state.copyWith(yourStance: you, opponentStance: opponent));
+      case StanceChangedEvent():
+        // The opponent switched; we are told nothing about which way, and
+        // there is nothing to record.
+        break;
 
       case ResolveStartEvent(:final objectives, :final cardSeconds, :final startedAt):
         emit(state.copyWith(
@@ -125,12 +123,8 @@ class GameBloc extends Bloc<GameEvent, GameState> {
       case TurnPhaseEvent(:final stage, :final until):
         emit(state.copyWith(turnStage: stage, stageDeadline: until));
 
-      case OpponentProgressEvent(:final completed, :final total, :final done):
-        emit(state.copyWith(
-          opponentProgress: completed,
-          opponentTotal: total,
-          opponentIsDone: done,
-        ));
+      case OpponentProgressEvent(:final done):
+        emit(state.copyWith(opponentIsDone: done));
 
       case HpEvent(:final you, :final opponent):
         emit(state.copyWith(yourHp: you, opponentHp: opponent));
@@ -190,7 +184,6 @@ class GameBloc extends Bloc<GameEvent, GameState> {
 
   GamePhase _phaseFrom(String raw) => switch (raw) {
         'race' => GamePhase.race,
-        'stance' => GamePhase.stance,
         'resolving' => GamePhase.resolving,
         'scoring' => GamePhase.scoring,
         'ended' => GamePhase.ended,

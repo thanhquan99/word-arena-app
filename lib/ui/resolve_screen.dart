@@ -8,6 +8,7 @@ import '../game/bloc/game_bloc.dart';
 import '../game/bloc/game_event.dart';
 import '../game/bloc/game_state.dart';
 import '../net/api_client.dart';
+import '../net/protocol.dart';
 import 'theme/arena_theme.dart';
 import 'widgets/arrange_words.dart';
 import 'widgets/ptt_button.dart';
@@ -99,7 +100,9 @@ class _ResolveScreenState extends State<ResolveScreen> {
                     style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  _StanceSwitch(state: state),
+                  const SizedBox(height: 12),
 
                   if (open == null)
                     Expanded(
@@ -319,11 +322,11 @@ class _AnswerPanel extends StatelessWidget {
   }
 }
 
-/// How far the opponent has got — a count, never which objectives.
+/// Whether the opponent has finished — nothing finer.
 ///
-/// §7.3 blocks per objective, so a defender who could watch the attacker's
-/// choices live would just copy them. The count still carries the thing that
-/// matters for pace: whether they are ahead, and whether they have finished.
+/// A count would already say more than the pace needs, and §7.3 blocks per
+/// objective: anything that hints at *what* they did lets a defender read the
+/// attack instead of guessing at it.
 class _OpponentProgress extends StatelessWidget {
   const _OpponentProgress({required this.state});
 
@@ -331,47 +334,141 @@ class _OpponentProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = state.opponentTotal == 0
-        ? state.objectives.length
-        : state.opponentTotal;
+    final done = state.opponentIsDone;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
-        color: Arena.surface2,
+        color: done ? Arena.enemy.withValues(alpha: 0.14) : Arena.surface2,
         borderRadius: BorderRadius.circular(Arena.radiusSm),
-        border: Arena.borderSm,
+        border: Border.all(
+          color: done ? Arena.enemy : Arena.ink,
+          width: Arena.borderWSm,
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('Đối thủ', style: TextStyle(fontSize: 13, color: Arena.inkSoft)),
-          const SizedBox(width: 10),
+          Text(done ? '⏱️' : '✍️', style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
           Text(
-            '${state.opponentProgress}/$total',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: Arena.ink,
+            done ? 'Đối thủ đã xong — đang chờ bạn' : 'Đối thủ đang làm…',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: done ? FontWeight.w700 : FontWeight.w400,
+              color: done ? Arena.enemy : Arena.inkSoft,
             ),
           ),
-          if (state.opponentIsDone) ...[
-            const SizedBox(width: 10),
-            const Text(
-              '✓ đã xong',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Arena.enemy,
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
+/// Attack or defend, switchable for as long as the card clock runs.
+///
+/// This used to be a three-second overlay before the objectives appeared — a
+/// question about a card the player had not read yet. Attack is lit by
+/// default; tapping the other side switches, and switching back is free.
+class _StanceSwitch extends StatelessWidget {
+  const _StanceSwitch({required this.state});
+
+  final GameState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = state.youAreDone;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _StanceButton(
+            icon: '⚔️',
+            label: 'Tấn công',
+            colour: Arena.enemy,
+            selected: state.yourStance == Stance.attack,
+            onPressed: locked
+                ? null
+                : () => context.read<GameBloc>().add(
+                      const StanceChosen(Stance.attack),
+                    ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StanceButton(
+            icon: '🛡️',
+            label: state.defenseAllowed ? 'Phòng thủ' : 'Khô máu — cấm thủ',
+            colour: Arena.accent,
+            selected: state.yourStance == Stance.defense,
+            onPressed: locked || !state.defenseAllowed
+                ? null
+                : () => context.read<GameBloc>().add(
+                      const StanceChosen(Stance.defense),
+                    ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StanceButton extends StatelessWidget {
+  const _StanceButton({
+    required this.icon,
+    required this.label,
+    required this.colour,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String icon;
+  final String label;
+  final Color colour;
+  final bool selected;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onPressed == null;
+
+    return Opacity(
+      opacity: disabled && !selected ? 0.4 : 1,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(Arena.radiusSm),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? colour.withValues(alpha: 0.2) : Arena.surface2,
+            borderRadius: BorderRadius.circular(Arena.radiusSm),
+            border: Border.all(
+              color: selected ? colour : Arena.ink,
+              width: selected ? Arena.borderW : Arena.borderWSm,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(icon, style: const TextStyle(fontSize: 17)),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                  color: selected ? Arena.ink : Arena.inkSoft,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Locks in `completedTime` without waiting out the clock.
 /// Locks in `completedTime` without waiting out the clock.
 ///
 /// Without this button the §7.2 tie-break has nothing to compare: two players
