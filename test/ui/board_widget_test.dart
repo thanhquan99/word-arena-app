@@ -64,13 +64,16 @@ void main() {
     expect(find.byType(MissionCardWidget), findsNWidgets(4));
   });
 
-  testWidgets('shows both health bars', (tester) async {
+  testWidgets('shows both fighters with their health', (tester) async {
     await tester.pumpWidget(_host(_state(playerHp: 41, botHp: 32)));
 
     expect(find.text('Bạn'), findsOneWidget);
     expect(find.text('Đối thủ'), findsOneWidget);
-    expect(find.text('41'), findsOneWidget);
-    expect(find.text('32'), findsOneWidget);
+
+    // Health reads out of the nameplate now — the bar beside it carries no
+    // text of its own.
+    expect(find.text('41 / 50'), findsOneWidget);
+    expect(find.text('32 / 50'), findsOneWidget);
   });
 
   testWidgets('a tap on a card reports its slot index', (tester) async {

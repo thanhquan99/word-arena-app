@@ -60,60 +60,33 @@ class HpBarWidget extends StatelessWidget {
     return axis == HpBarAxis.horizontal ? _buildHorizontal() : _buildVertical();
   }
 
-  /// Runs across, draining right to left, with the name and number at the ends.
+  /// Runs across, draining left to right.
+  ///
+  /// No label or number of its own — in the side-by-side arena both already
+  /// sit in the nameplate above, and repeating them here only crowds the bar.
   Widget _buildHorizontal() {
-    return Row(
-      children: [
-        SizedBox(
-          width: 54,
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Arena.inkSoft,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Container(
-            height: _thickness,
+    return Container(
+      height: _thickness,
+      decoration: BoxDecoration(
+        color: Arena.surface2,
+        borderRadius: BorderRadius.circular(_thickness / 2),
+        border: Arena.borderSm,
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: _fraction,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
             decoration: BoxDecoration(
-              color: Arena.surface2,
-              borderRadius: BorderRadius.circular(_thickness / 2),
-              border: Arena.borderSm,
-            ),
-            padding: const EdgeInsets.all(3),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: _fraction,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  decoration: BoxDecoration(
-                    color: _color,
-                    borderRadius: BorderRadius.circular(_thickness / 2),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 30,
-          child: Text(
-            '$hp',
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
               color: _color,
+              borderRadius: BorderRadius.circular(_thickness / 2),
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 

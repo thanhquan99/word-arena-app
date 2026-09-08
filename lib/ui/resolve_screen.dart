@@ -100,9 +100,7 @@ class _ResolveScreenState extends State<ResolveScreen> {
                     style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 12),
-                  _StanceSwitch(state: state),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
                   if (open == null)
                     Expanded(
@@ -126,6 +124,10 @@ class _ResolveScreenState extends State<ResolveScreen> {
                   const SizedBox(height: 10),
                   _OpponentProgress(state: state),
                   const SizedBox(height: 10),
+                  // Stance sits at the bottom, by the thumb and next to Done —
+                  // it is a decision revisited while playing, not a header.
+                  _StanceSwitch(state: state),
+                  const SizedBox(height: 8),
                   _DoneButton(state: state),
                 ],
               ),

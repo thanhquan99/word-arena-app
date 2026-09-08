@@ -153,31 +153,29 @@ class _BoardWidgetState extends State<BoardWidget> {
           padding: const EdgeInsets.all(12),
           child: Column(
             children: [
-              // The arena sits on top: two bars facing each other with the
-              // pets between them. Feature-04 put the fighters in narrow side
-              // columns, which left no room for a strike to travel across.
-              SizedBox(
-                height: constraintsHeight(context) * 0.34,
-                child: _Arena(
-                  key: _arenaKey,
-                  state: state,
-                  playerPet: widget.playerPet,
-                  opponentPet: widget.opponentPet,
-                  playerKey: _playerPetKey,
-                  opponentKey: _opponentPetKey,
-                  burstId: _burstId,
-                  burst: _burst,
-                  onBurstDone: () {
-                    if (mounted) setState(() => _burstId = null);
-                  },
-                  floatingDamage: _floatingDamage,
-                  damageKey: _shownDamage,
-                  onDamageDone: () {
-                    if (mounted) setState(() => _floatingDamage = null);
-                  },
-                ),
+              // The arena sits on top, sized to its content: two fighters side
+              // by side, each with their pet above their bar. Feature-04 put
+              // them in narrow side columns, which left no room for a strike
+              // to travel across.
+              _Arena(
+                key: _arenaKey,
+                state: state,
+                playerPet: widget.playerPet,
+                opponentPet: widget.opponentPet,
+                playerKey: _playerPetKey,
+                opponentKey: _opponentPetKey,
+                burstId: _burstId,
+                burst: _burst,
+                onBurstDone: () {
+                  if (mounted) setState(() => _burstId = null);
+                },
+                floatingDamage: _floatingDamage,
+                damageKey: _shownDamage,
+                onDamageDone: () {
+                if (mounted) setState(() => _floatingDamage = null);
+                },
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Expanded(
                 child: _MissionGrid(
                   missions: state.slots,
@@ -191,18 +189,14 @@ class _BoardWidgetState extends State<BoardWidget> {
       ),
     );
   }
-
-  /// Available height, so the arena can take a share of it rather than a
-  /// fixed number of pixels that would crowd a small phone.
-  double constraintsHeight(BuildContext context) =>
-      MediaQuery.sizeOf(context).height;
 }
 
-/// The two fighters, facing each other.
+/// The two fighters, side by side.
 ///
-/// Health bars run across at the top and bottom, pets in the middle with the
-/// opponent on the left and the player on the right, so a strike reads as
-/// travelling between them.
+/// Each side is one column — pet portrait and name on top, health bar under
+/// it, carried effects under that. Putting them level rather than stacking
+/// one above the other lets a strike travel straight across, and keeps both
+/// health bars readable in one glance.
 class _Arena extends StatelessWidget {
   const _Arena({
     super.key,
@@ -237,53 +231,37 @@ class _Arena extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Column(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            HpBarWidget(
-              label: 'Đối thủ',
-              hp: state.opponentHp,
-              maxHp: GameState.maxHp,
-              baseColor: Arena.enemy,
-              axis: HpBarAxis.horizontal,
-            ),
-            const SizedBox(height: 4),
-            StatusBar(status: state.opponentStatus, label: 'đối thủ'),
             Expanded(
-              // Pushed out to the edges: the wider the gap, the more a strike
-              // reads as travelling between them rather than a local flash.
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _PetSlot(
-                      key: opponentKey,
-                      child: PetCorner(
-                        spec: opponentPet,
-                        state: state,
-                        isPlayer: false,
-                      ),
-                    ),
-                    _PetSlot(
-                      key: playerKey,
-                      child: PetCorner(
-                        spec: playerPet,
-                        state: state,
-                        isPlayer: true,
-                      ),
-                    ),
-                  ],
-                ),
+              child: _Fighter(
+                petKey: playerKey,
+                spec: playerPet,
+                state: state,
+                isPlayer: true,
+                label: 'Bạn',
+                hp: state.yourHp,
+                barColour: Arena.self,
+                status: state.yourStatus,
+                statusLabel: 'của bạn',
               ),
             ),
-            StatusBar(status: state.yourStatus, label: 'của bạn'),
-            const SizedBox(height: 4),
-            HpBarWidget(
-              label: 'Bạn',
-              hp: state.yourHp,
-              maxHp: GameState.maxHp,
-              baseColor: Arena.self,
-              axis: HpBarAxis.horizontal,
+            const SizedBox(width: 14),
+            Expanded(
+              child: _Fighter(
+                petKey: opponentKey,
+                spec: opponentPet,
+                state: state,
+                isPlayer: false,
+                label: state.isBot ? 'Bot' : 'Đối thủ',
+                hp: state.opponentHp,
+                barColour: Arena.enemy,
+                status: state.opponentStatus,
+                statusLabel: 'đối thủ',
+                // Mirrored so the two pets face one another across the gap.
+                facingLeft: true,
+              ),
             ),
           ],
         ),
@@ -310,6 +288,108 @@ class _Arena extends StatelessWidget {
               onComplete: onDamageDone,
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// One side: portrait and name, then the health bar, then carried effects.
+class _Fighter extends StatelessWidget {
+  const _Fighter({
+    required this.petKey,
+    required this.spec,
+    required this.state,
+    required this.isPlayer,
+    required this.label,
+    required this.hp,
+    required this.barColour,
+    required this.status,
+    required this.statusLabel,
+    this.facingLeft = false,
+  });
+
+  final GlobalKey petKey;
+  final PetSpec spec;
+  final GameState state;
+  final bool isPlayer;
+
+  /// Who this is — "Bạn", or the opponent's name.
+  final String label;
+  final int hp;
+  final Color barColour;
+  final PlayerStatus status;
+  final String statusLabel;
+
+  /// Flips the portrait so the two pets look at each other.
+  final bool facingLeft;
+
+  @override
+  Widget build(BuildContext context) {
+    final pet = _PetSlot(
+      key: petKey,
+      child: facingLeft
+          ? Transform.flip(
+              flipX: true,
+              child: PetCorner(spec: spec, state: state, isPlayer: isPlayer),
+            )
+          : PetCorner(spec: spec, state: state, isPlayer: isPlayer),
+    );
+
+    final nameplate = Column(
+      crossAxisAlignment:
+          facingLeft ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: Arena.ink,
+          ),
+        ),
+        Text(
+          spec.name.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: spec.primary,
+          ),
+        ),
+        Text(
+          '$hp / ${GameState.maxHp}',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Arena.inkSoft,
+          ),
+        ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment:
+              facingLeft ? MainAxisAlignment.end : MainAxisAlignment.start,
+          children: facingLeft
+              ? [Flexible(child: nameplate), const SizedBox(width: 8), pet]
+              : [pet, const SizedBox(width: 8), Flexible(child: nameplate)],
+        ),
+        const SizedBox(height: 6),
+        HpBarWidget(
+          label: '',
+          hp: hp,
+          maxHp: GameState.maxHp,
+          baseColor: barColour,
+          axis: HpBarAxis.horizontal,
+        ),
+        const SizedBox(height: 5),
+        StatusBar(status: status, label: statusLabel),
       ],
     );
   }
