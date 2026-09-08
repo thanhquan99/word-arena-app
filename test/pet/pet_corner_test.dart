@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:word_arena/content/models.dart';
 import 'package:word_arena/game/bloc/game_state.dart';
+import 'package:word_arena/net/protocol.dart';
 import 'package:word_arena/pet/pet_atlas.dart';
 import 'package:word_arena/pet/pet_spec.dart';
 import 'package:word_arena/pet/pet_sprite_painter.dart';
@@ -13,17 +14,35 @@ GameState _state({
   GamePhase phase = GamePhase.idle,
   int playerHp = GameState.maxHp,
   int botHp = GameState.maxHp,
-  double? lastDamage,
+  double? youDealt,
+  double? theyDealt,
   DateTime? stunUntil,
-}) =>
-    GameState(
-      phase: phase,
-      missions: const <Mission>[],
-      playerHp: playerHp,
-      botHp: botHp,
-      lastDamage: lastDamage,
-      stunUntil: stunUntil,
-    );
+}) {
+  // Since feature-06 the pets react to the `strike` beat and read who dealt
+  // what straight off the result, rather than inferring direction from which
+  // health bar happened to drop.
+  final hasTurn = youDealt != null || theyDealt != null;
+
+  return GameState(
+    phase: phase,
+    slots: const <Mission>[],
+    yourHp: playerHp,
+    opponentHp: botHp,
+    turnStage: hasTurn ? TurnStage.strike : null,
+    lastTurn: !hasTurn
+        ? null
+        : TurnSettledEvent(
+            outcome: (youDealt ?? 0) > 0 ? TurnOutcome.youWin : TurnOutcome.opponentWin,
+            reason: TurnReason.count,
+            you: SideResult(n: 1, completedTime: 0, damageDealt: youDealt ?? 0),
+            opponent: SideResult(n: 1, completedTime: 0, damageDealt: theyDealt ?? 0),
+            blocked: const [],
+          ),
+    yourStatus: PlayerStatus(
+      stunnedUntil: stunUntil?.millisecondsSinceEpoch,
+    ),
+  );
+}
 
 Widget _host(Widget child) => MaterialApp(
       home: Scaffold(body: Center(child: SizedBox.square(dimension: 80, child: child))),
@@ -99,7 +118,7 @@ void main() {
 
       await tester.pumpWidget(_host(PetCorner(
         spec: PetSpec.fire,
-        state: _state(botHp: GameState.maxHp - 5, lastDamage: 5),
+        state: _state(botHp: GameState.maxHp - 5, youDealt: 5),
         isPlayer: true,
       )));
       await tester.pump();
@@ -117,7 +136,7 @@ void main() {
 
       await tester.pumpWidget(_host(PetCorner(
         spec: PetSpec.fire,
-        state: _state(playerHp: GameState.maxHp - 4, lastDamage: 4),
+        state: _state(playerHp: GameState.maxHp - 4, theyDealt: 4),
         isPlayer: true,
       )));
       await tester.pump();
@@ -134,7 +153,7 @@ void main() {
       await tester.pumpWidget(at(_state()));
       await tester.pump();
 
-      final hit = _state(botHp: GameState.maxHp - 3, lastDamage: 3);
+      final hit = _state(botHp: GameState.maxHp - 3, youDealt: 3);
       await tester.pumpWidget(at(hit));
       await tester.pump();
       expect(_pose(tester), PetPose.cast);
@@ -159,7 +178,7 @@ void main() {
 
       await tester.pumpWidget(_host(PetCorner(
         spec: PetSpec.fire,
-        state: _state(botHp: GameState.maxHp - 6, lastDamage: 6),
+        state: _state(botHp: GameState.maxHp - 6, youDealt: 6),
         isPlayer: true,
       )));
       await tester.pump();

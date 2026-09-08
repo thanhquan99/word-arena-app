@@ -1,480 +1,479 @@
-import 'dart:async';
-import 'dart:math';
 
-import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mocktail/mocktail.dart';
-import 'package:word_arena/content/content_repository.dart';
-import 'package:word_arena/content/models.dart';
 import 'package:word_arena/game/bloc/game_bloc.dart';
 import 'package:word_arena/game/bloc/game_event.dart';
 import 'package:word_arena/game/bloc/game_state.dart';
-import 'package:word_arena/net/api_client.dart';
-import 'package:word_arena/net/grade_result.dart';
+import 'package:word_arena/net/match_socket.dart';
+import 'package:word_arena/net/protocol.dart';
 
-class _MockApi extends Mock implements ApiClient {}
+import '../support/fake_socket.dart';
 
-class _FakeObjective extends Fake implements Objective {}
-
-Objective _objective(String id) => Objective(
-      id: id,
-      text: 'say something',
-      mode: ObjectiveMode.speak,
-      timeLimitSec: 8,
-      gradingTier: GradingTier.binary,
-      sampleAnswers: const ['ok'],
-    );
-
-Mission _mission(
-  String id,
-  Pace pace, {
-  int objectives = 2,
-  int tier = 2,
-  MissionType type = MissionType.vocabulary,
-}) =>
-    Mission(
-      id: id,
-      type: type,
-      tier: tier,
-      pace: pace,
-      prompt: id,
-      objectives: [for (var i = 0; i < objectives; i++) _objective('$id-$i')],
-    );
-
-/// Enough variety per pace that the pool can always refill a slot.
-List<Mission> _catalogue() => [
-      for (var i = 0; i < 4; i++)
-        _mission('fast$i', Pace.fast, type: MissionType.oddOneOut, tier: 1 + i % 2),
-      for (var i = 0; i < 4; i++)
-        _mission('med$i', Pace.medium, tier: 2 + i % 2),
-      for (var i = 0; i < 4; i++)
-        _mission('heavy$i', Pace.heavy, type: MissionType.tense, tier: 4),
-    ];
-
-const _pass = GradeResult(passed: true, multiplier: 1);
-const _fail = GradeResult(passed: false, multiplier: 0);
-
+/// The bloc is a translator now: server frames in, state out; taps in, frames
+/// out. These tests hold it to exactly that and nothing more — every rule it
+/// used to own lives on the server since feature-05.
 void main() {
-  setUpAll(() => registerFallbackValue(_FakeObjective()));
+  late FakeChannel channel;
+  late GameBloc bloc;
 
-  late _MockApi api;
-
-  GameBloc build({
-    GradeResult grade = _pass,
-    MissionEffect? effect,
-    List<Mission>? catalogue,
-  }) {
-    when(() => api.gradeObjective(
-          objective: any(named: 'objective'),
-          transcript: any(named: 'transcript'),
-          level: any(named: 'level'),
-        )).thenAnswer((_) async => grade);
-
-    return GameBloc(
-      content: FakeContentRepository(catalogue ?? _catalogue()),
-      api: api,
-      random: Random(42),
-      // Pinning the effect keeps these tests readable: the alternative is
-      // hunting for a seed that happens to roll the one under test.
-      chooseEffect: (_, _) => effect,
+  setUp(() {
+    channel = FakeChannel();
+    bloc = GameBloc(
+      socket: MatchSocket(baseUrl: 'http://localhost:3000', connect: (_) => channel),
     );
+  });
+
+  tearDown(() async {
+    await bloc.close();
+  });
+
+  Future<void> joined({bool bot = true}) async {
+    bloc.add(MatchJoined(mode: bot ? MatchMode.bot : MatchMode.pvp));
+    await pump();
+    channel.emit(_matched(isBot: bot));
+    await pump();
   }
 
-  /// Plays slot [slot] to completion and returns once the mission has settled.
-  Future<void> playMission(GameBloc bloc, {int slot = 0}) async {
-    bloc.add(const GameStarted());
-    await Future<void>.delayed(Duration.zero);
-    bloc.add(MissionTapped(slot));
-    await Future<void>.delayed(Duration.zero);
+  group('joining', () {
+    test('starts disconnected', () {
+      expect(bloc.state.connection, MatchLink.disconnected);
+      expect(bloc.state.slots, isEmpty);
+    });
 
-    final total = bloc.state.activeMission!.objectives.length;
-    for (var i = 0; i < total; i++) {
-      bloc.add(const ObjectiveAnswered('an answer'));
-      await Future<void>.delayed(Duration.zero);
+    test('a join frame goes out and matched turns the link ready', () async {
+      await joined();
+
+      expect(channel.sentTypes, contains('join'));
+      expect(bloc.state.connection, MatchLink.ready);
+      expect(bloc.state.isBot, isTrue);
+    });
+
+    test('waiting for an opponent is a state, not an error to swallow', () async {
+      bloc.add(const MatchJoined(mode: MatchMode.pvp));
+      await pump();
+      channel.emit({'type': 'error', 'error': 'waiting_for_opponent'});
+      await pump();
+
+      expect(bloc.state.connection, MatchLink.waitingForOpponent);
+    });
+  });
+
+  group('the board', () {
+    test('four cards arrive and land in state', () async {
+      await joined();
+      channel.emit(_board());
+      await pump();
+
+      expect(bloc.state.slots, hasLength(4));
+      expect(bloc.state.phase, GamePhase.idle);
+    });
+
+    test('a tap is forwarded without guessing what the server will do',
+        () async {
+      await joined();
+      channel.emit(_board());
+      await pump();
+
+      bloc.add(const CardTapped(2));
+      await pump();
+
+      expect(channel.sentTypes, contains('tap_card'));
+      // The server runs a 250ms race and may open a different card, so the
+      // client must not move the phase itself.
+      expect(bloc.state.phase, GamePhase.idle);
+    });
+
+    test('taps before the link is ready go nowhere', () async {
+      bloc.add(const CardTapped(0));
+      await pump();
+
+      expect(channel.sentTypes, isNot(contains('tap_card')));
+    });
+  });
+
+  group('stance — §3.3', () {
+    /// Cards now open straight into play — the three-second stance window is
+    /// gone, so these drive the resolve phase directly.
+    Future<void> playing() async {
+      await joined();
+      channel.emit(_cardOpened());
+      await pump();
+      channel.emit(_resolveStart());
+      await pump();
     }
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-  }
 
-  setUp(() => api = _MockApi());
+    test('an opened card lands in resolving with Attack already set', () async {
+      await joined();
+      channel.emit(_cardOpened());
+      await pump();
 
-  group('GameStarted', () {
-    blocTest<GameBloc, GameState>(
-      'deals five missions and sits in idle',
-      build: build,
-      act: (bloc) => bloc.add(const GameStarted()),
-      verify: (bloc) {
-        expect(bloc.state.missions, hasLength(5));
-        expect(bloc.state.phase, GamePhase.idle);
-        expect(bloc.state.playerHp, GameState.maxHp);
-        expect(bloc.state.botHp, GameState.maxHp);
-      },
-    );
+      expect(bloc.state.openedMission, isNotNull);
+      expect(bloc.state.objectives, hasLength(2));
+      expect(bloc.state.yourStance, Stance.attack);
+    });
 
-    // A plain test rather than blocTest: blocTest closes the bloc before
-    // running verify, and closing cancels the timer being asserted on.
-    test('starts the idle rotation clock', () async {
-      final bloc = build();
-      addTearDown(bloc.close);
+    test('switching to Defense sends it and shows it', () async {
+      await playing();
 
-      bloc.add(const GameStarted());
-      await Future<void>.delayed(Duration.zero);
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
 
-      expect(bloc.isIdleTimerActive, isTrue);
+      expect(channel.sentTypes, contains('set_stance'));
+      expect(bloc.state.yourStance, Stance.defense);
+    });
+
+    test('switching back is free', () async {
+      await playing();
+
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
+      bloc.add(const StanceChosen(Stance.attack));
+      await pump();
+
+      expect(bloc.state.yourStance, Stance.attack);
+    });
+
+    test('Defense is refused on a 🎯 All-out card', () async {
+      await joined();
+      channel.emit(_cardOpened(defenseAllowed: false));
+      await pump();
+      channel.emit(_resolveStart());
+      await pump();
+
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
+
+      expect(channel.sentTypes, isNot(contains('set_stance')));
+      expect(bloc.state.yourStance, Stance.attack);
+    });
+
+    test('switching stops once you are done', () async {
+      await playing();
+      bloc.add(const TurnFinished());
+      await pump();
+
+      final before = channel.sent.length;
+      bloc.add(const StanceChosen(Stance.defense));
+      await pump();
+
+      expect(channel.sent.length, before);
+      expect(bloc.state.yourStance, Stance.attack);
+    });
+
+    test('the opponent switching tells us nothing about which way', () async {
+      await playing();
+      final before = bloc.state;
+
+      channel.emit({'type': 'stance_changed', 'changed': true});
+      await pump();
+
+      // Nothing to record — that is the point.
+      expect(bloc.state, before);
     });
   });
 
-  group('MissionTapped', () {
-    blocTest<GameBloc, GameState>(
-      'enters resolving on the tapped slot',
-      build: build,
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-      },
-      verify: (bloc) {
-        expect(bloc.state.phase, GamePhase.resolving);
-        expect(bloc.state.activeMissionIndex, 0);
-        expect(bloc.state.objectiveIndex, 0);
-      },
-    );
+  group('resolving — §3.4', () {
+    Future<void> resolving() async {
+      await joined();
+      channel.emit(_cardOpened());
+      await pump();
+      channel.emit(_resolveStart());
+      await pump();
+    }
 
-    // Regression guard: if the rotation clock keeps running, a mission can be
-    // swapped out from under the player while they are answering it.
-    //
-    // A plain test because blocTest closes the bloc before verify, which would
-    // cancel the timer regardless of whether the code did.
-    test('cancels the idle rotation clock on entry', () async {
-      final bloc = build();
-      addTearDown(bloc.close);
+    test('the card clock and every objective arrive together', () async {
+      await resolving();
 
-      bloc.add(const GameStarted());
-      await Future<void>.delayed(Duration.zero);
-      expect(bloc.isIdleTimerActive, isTrue, reason: 'precondition');
-
-      bloc.add(const MissionTapped(0));
-      await Future<void>.delayed(Duration.zero);
-
-      expect(bloc.isIdleTimerActive, isFalse);
+      expect(bloc.state.phase, GamePhase.resolving);
+      expect(bloc.state.cardSeconds, 16);
+      expect(bloc.state.objectives, hasLength(2));
     });
 
-    blocTest<GameBloc, GameState>(
-      'ignores a tap while stunned',
-      build: build,
-      seed: () => GameState(
-        missions: _catalogue().take(5).toList(),
-        stunUntil: DateTime.now().add(const Duration(seconds: 3)),
-      ),
-      act: (bloc) => bloc.add(const MissionTapped(0)),
-      expect: () => <GameState>[],
-    );
+    test('answers carry their objective id — the player picks the order',
+        () async {
+      await resolving();
 
-    blocTest<GameBloc, GameState>(
-      'ignores a tap outside idle',
-      build: build,
-      seed: () => GameState(
-        phase: GamePhase.resolving,
-        missions: _catalogue().take(5).toList(),
-      ),
-      act: (bloc) => bloc.add(const MissionTapped(1)),
-      expect: () => <GameState>[],
-    );
+      bloc.add(const ObjectiveAnswered(objectiveId: 'o2', transcript: 'hello'));
+      await pump();
+
+      expect(channel.lastSent?['objectiveId'], 'o2');
+    });
+
+    test('a passed grade marks the objective done', () async {
+      await resolving();
+      channel.emit(_objectiveResult('o1', passed: true));
+      await pump();
+
+      expect(bloc.state.yourCompleted, contains('o1'));
+      expect(bloc.state.yourFailed, isEmpty);
+    });
+
+    test('a failed grade is kept so the card can show ✖️ and be retried',
+        () async {
+      await resolving();
+      channel.emit(_objectiveResult('o1', passed: false));
+      await pump();
+
+      expect(bloc.state.yourCompleted, isEmpty);
+      expect(bloc.state.yourFailed, contains('o1'));
+    });
+
+    test('retrying a failed objective clears the failure', () async {
+      await resolving();
+      channel.emit(_objectiveResult('o1', passed: false));
+      await pump();
+      channel.emit(_objectiveResult('o1', passed: true));
+      await pump();
+
+      expect(bloc.state.yourCompleted, contains('o1'));
+      expect(bloc.state.yourFailed, isEmpty);
+    });
+
+    test("the opponent's progress is tracked separately", () async {
+      await resolving();
+      channel.emit(_objectiveResult('o1', passed: true, mine: false));
+      await pump();
+
+      expect(bloc.state.opponentCompleted, contains('o1'));
+      expect(bloc.state.yourCompleted, isEmpty);
+    });
+
+    test('Done locks the turn in early — §7.2 needs a time to compare',
+        () async {
+      await resolving();
+
+      bloc.add(const TurnFinished());
+      await pump();
+
+      expect(channel.sentTypes, contains('done'));
+      expect(bloc.state.youAreDone, isTrue);
+    });
+
+    test('answers after Done are not sent', () async {
+      await resolving();
+      bloc.add(const TurnFinished());
+      await pump();
+
+      final before = channel.sent.length;
+      bloc.add(const ObjectiveAnswered(objectiveId: 'o1', transcript: 'x'));
+      await pump();
+
+      expect(channel.sent.length, before);
+    });
   });
 
-  group('playing a mission through', () {
-    blocTest<GameBloc, GameState>(
-      'walks the objectives, settles, and returns to idle',
-      build: build,
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+  group('scoring', () {
+    test('a settled turn is kept whole so the UI can explain it', () async {
+      await joined();
+      channel.emit(_turnSettled(reason: 'time', outcome: 'opponent_win'));
+      await pump();
 
-        final count = bloc.state.activeMission!.objectives.length;
-        for (var i = 0; i < count; i++) {
-          bloc.add(const ObjectiveAnswered('an answer'));
-          await Future<void>.delayed(Duration.zero);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      verify: (bloc) {
-        expect(bloc.state.phase, GamePhase.idle);
-        expect(bloc.state.activeMissionIndex, isNull);
-        expect(bloc.state.botHp, lessThan(GameState.maxHp));
-      },
-    );
+      expect(bloc.state.phase, GamePhase.scoring);
+      expect(bloc.state.lastTurn?.reason, TurnReason.time);
+      expect(bloc.state.lastTurn?.outcome, TurnOutcome.opponentWin);
+    });
 
-    blocTest<GameBloc, GameState>(
-      'does not wait for a grade before moving to the next objective',
-      build: () {
-        // A grade that never arrives: play must continue regardless.
-        when(() => api.gradeObjective(
-              objective: any(named: 'objective'),
-              transcript: any(named: 'transcript'),
-              level: any(named: 'level'),
-            )).thenAnswer((_) => Completer<GradeResult>().future);
-        return GameBloc(
-          content: FakeContentRepository(_catalogue()),
-          api: api,
-          random: Random(42),
-        );
-      },
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const ObjectiveAnswered('an answer'));
-        await Future<void>.delayed(Duration.zero);
-      },
-      verify: (bloc) {
-        expect(bloc.state.objectiveIndex, 1,
-            reason: 'should have advanced without the grade');
-        expect(bloc.state.results.first, isNull,
-            reason: 'the grade is still outstanding');
-      },
-    );
+    test('blocked objectives survive into state', () async {
+      await joined();
+      channel.emit(_turnSettled(reason: 'blocked', blocked: ['o1']));
+      await pump();
 
-    blocTest<GameBloc, GameState>(
-      'a late grade still lands on the right objective',
-      build: build,
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+      expect(bloc.state.lastTurn?.blocked, ['o1']);
+    });
 
-        // Arrives after the player has already moved on.
-        bloc.add(const GradeReceived(objectiveIndex: 0, result: _pass));
-        await Future<void>.delayed(Duration.zero);
-      },
-      verify: (bloc) => expect(bloc.state.results[0]?.passed, isTrue),
-    );
+    test('health comes from the server, never from a local sum', () async {
+      await joined();
+      channel.emit({'type': 'hp', 'you': 44, 'opponent': 39});
+      await pump();
 
-    blocTest<GameBloc, GameState>(
-      'a timed-out objective is recorded as a miss without calling the API',
-      build: build,
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const ObjectiveTimedOut());
-        await Future<void>.delayed(Duration.zero);
-      },
-      verify: (bloc) {
-        expect(bloc.state.results[0]?.passed, isFalse);
-        verifyNever(() => api.gradeObjective(
-              objective: any(named: 'objective'),
-              transcript: any(named: 'transcript'),
-              level: any(named: 'level'),
-            ));
-      },
-    );
+      expect(bloc.state.yourHp, 44);
+      expect(bloc.state.opponentHp, 39);
+    });
+
+    test('carried effects are recorded for both sides', () async {
+      await joined();
+      channel.emit({
+        'type': 'status',
+        'you': {'shield': true, 'burnTurnsLeft': 0},
+        'opponent': {'burnTurnsLeft': 3, 'rush': true},
+      });
+      await pump();
+
+      expect(bloc.state.yourStatus.shield, isTrue);
+      expect(bloc.state.opponentStatus.burnTurnsLeft, 3);
+      expect(bloc.state.opponentStatus.rush, isTrue);
+    });
   });
 
-  group('stun', () {
-    blocTest<GameBloc, GameState>(
-      'a wasted mission stuns the player and bumps the streak',
-      build: () => build(grade: _fail),
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+  group('turn pacing — feature-06', () {
+    test('each beat lands in state with its deadline', () async {
+      await joined();
 
-        final count = bloc.state.activeMission!.objectives.length;
-        for (var i = 0; i < count; i++) {
-          bloc.add(const ObjectiveAnswered('wrong'));
-          await Future<void>.delayed(Duration.zero);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      verify: (bloc) {
-        expect(bloc.state.missStreak, 1);
-        expect(bloc.state.stunUntil, isNotNull);
-      },
-    );
+      for (final (raw, expected) in [
+        ('compare', TurnStage.compare),
+        ('strike', TurnStage.strike),
+        ('settle', TurnStage.settle),
+      ]) {
+        channel.emit({'type': 'turn_phase', 'stage': raw, 'until': 9000});
+        await pump();
+        expect(bloc.state.turnStage, expected);
+        expect(bloc.state.stageDeadline, 9000);
+      }
+    });
 
-    blocTest<GameBloc, GameState>(
-      'clearing at least one objective resets the streak',
-      build: build,
-      seed: () => GameState(
-        missions: _catalogue().take(5).toList(),
-        missStreak: 2,
-      ),
-      act: (bloc) async {
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+    test('opponent progress is a flag, not a count', () async {
+      await joined();
+      channel.emit({'type': 'opponent_progress', 'done': false});
+      await pump();
 
-        final count = bloc.state.activeMission!.objectives.length;
-        for (var i = 0; i < count; i++) {
-          bloc.add(const ObjectiveAnswered('an answer'));
-          await Future<void>.delayed(Duration.zero);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      verify: (bloc) => expect(bloc.state.missStreak, 0),
-    );
-  });
+      expect(bloc.state.opponentIsDone, isFalse);
+    });
 
-  group('idle rotation', () {
-    blocTest<GameBloc, GameState>(
-      'rotates the oldest slot when nobody picks a mission',
-      build: build,
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        final before = bloc.state.missions.map((m) => m.id).toList();
+    test('the opponent pressing Done is visible', () async {
+      await joined();
+      channel.emit({'type': 'opponent_progress', 'done': true});
+      await pump();
 
-        bloc.add(const RefillTick());
-        await Future<void>.delayed(Duration.zero);
+      expect(bloc.state.opponentIsDone, isTrue);
+    });
 
-        final after = bloc.state.missions.map((m) => m.id).toList();
-        expect(after, isNot(before));
-      },
-      verify: (bloc) => expect(bloc.state.missions, hasLength(5)),
-    );
+    test('a new card wipes the previous turn pacing', () async {
+      await joined();
+      channel.emit({'type': 'turn_phase', 'stage': 'settle', 'until': 9000});
+      channel.emit({'type': 'opponent_progress', 'done': true});
+      await pump();
 
-    blocTest<GameBloc, GameState>(
-      'does not rotate while a mission is being played',
-      build: build,
-      seed: () => GameState(
-        phase: GamePhase.resolving,
-        missions: _catalogue().take(5).toList(),
-      ),
-      act: (bloc) => bloc.add(const RefillTick()),
-      expect: () => <GameState>[],
-    );
+      channel.emit(_board());
+      await pump();
+
+      expect(bloc.state.turnStage, isNull);
+      expect(bloc.state.stageDeadline, isNull);
+      expect(bloc.state.opponentIsDone, isFalse);
+    });
   });
 
   group('end of match', () {
-    blocTest<GameBloc, GameState>(
-      'ends once the opponent is out of health',
-      build: build,
-      seed: () => GameState(
-        missions: _catalogue().take(5).toList(),
-        botHp: 1,
-      ),
-      act: (bloc) async {
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+    test('the winner comes from the server, not from health', () async {
+      await joined();
+      channel.emit({'type': 'ended', 'winner': 'you'});
+      await pump();
 
-        final count = bloc.state.activeMission!.objectives.length;
-        for (var i = 0; i < count; i++) {
-          bloc.add(const ObjectiveAnswered('an answer'));
-          await Future<void>.delayed(Duration.zero);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      verify: (bloc) {
-        expect(bloc.state.phase, GamePhase.ended);
-        expect(bloc.state.botHp, 0);
-        expect(bloc.isIdleTimerActive, isFalse,
-            reason: 'the clock should stop once the match is over');
-      },
-    );
+      expect(bloc.state.phase, GamePhase.ended);
+      expect(bloc.state.winner, 'you');
+    });
 
-    blocTest<GameBloc, GameState>(
-      'collects missed objectives for the post-match review',
-      build: () => build(grade: _fail),
-      act: (bloc) async {
-        bloc.add(const GameStarted());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const MissionTapped(0));
-        await Future<void>.delayed(Duration.zero);
+    test('a draw is a real outcome', () async {
+      await joined();
+      channel.emit({'type': 'ended', 'winner': 'draw'});
+      await pump();
 
-        final count = bloc.state.activeMission!.objectives.length;
-        for (var i = 0; i < count; i++) {
-          bloc.add(const ObjectiveAnswered('wrong'));
-          await Future<void>.delayed(Duration.zero);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      verify: (bloc) => expect(bloc.state.missedObjectives, isNotEmpty),
-    );
+      expect(bloc.state.winner, 'draw');
+    });
   });
 
-  group('mission effects', () {
-    test('heal pays nothing when objectives were missed', () async {
-      // The payout is conditional on a clean sweep (Game_Rule section 8.1).
-      final bloc = build(grade: _fail, effect: MissionEffect.heal);
-      addTearDown(bloc.close);
+  group('what the bloc no longer does', () {
+    test('a card refill clears everything scoped to the turn', () async {
+      await joined();
+      channel.emit(_cardOpened());
+      await pump();
+      channel.emit(_resolveStart());
+      await pump();
+      channel.emit(_objectiveResult('o1', passed: true));
+      await pump();
 
-      await playMission(bloc);
+      channel.emit(_board());
+      await pump();
 
-      expect(bloc.state.playerHp, GameState.maxHp);
-      expect(bloc.state.completedCount, 0);
+      expect(bloc.state.openedMission, isNull);
+      expect(bloc.state.yourCompleted, isEmpty);
+      expect(bloc.state.objectives, isEmpty);
     });
 
-    test('heal cannot push health above the maximum', () async {
-      final bloc = build(effect: MissionEffect.heal);
-      addTearDown(bloc.close);
+    test('an unknown frame is ignored rather than fatal', () async {
+      await joined();
+      final before = bloc.state;
 
-      await playMission(bloc);
+      channel.emit({'type': 'some_future_event', 'payload': 1});
+      await pump();
 
-      expect(bloc.state.playerHp, GameState.maxHp);
-    });
-
-    test('mirror sends half the damage back at the player', () async {
-      final bloc = build(effect: MissionEffect.mirror);
-      addTearDown(bloc.close);
-
-      await playMission(bloc);
-
-      final dealt = GameState.maxHp - bloc.state.botHp;
-      expect(dealt, greaterThan(0));
-      // Losing health to your own attack is the whole point of the effect.
-      expect(bloc.state.playerHp, lessThan(GameState.maxHp));
-    });
-
-    test('gamble one objective short deals nothing', () async {
-      final bloc = build(grade: _fail, effect: MissionEffect.gamble);
-      addTearDown(bloc.close);
-
-      await playMission(bloc);
-
-      expect(bloc.state.botHp, GameState.maxHp);
-    });
-
-    test('the stun effect skips the escalation ladder', () async {
-      final bloc = build(grade: _fail, effect: MissionEffect.stun);
-      addTearDown(bloc.close);
-
-      await playMission(bloc);
-
-      // A first miss normally costs 1.5s; the effect makes it the full 3s.
-      final remaining = bloc.state.stunUntil!.difference(DateTime.now());
-      expect(remaining.inMilliseconds, greaterThan(2000));
-    });
-
-    test('burn keeps draining the opponent after the mission', () async {
-      final bloc = build(effect: MissionEffect.burn);
-      addTearDown(bloc.close);
-
-      await playMission(bloc);
-      final afterMission = bloc.state.botHp;
-
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-
-      expect(bloc.state.botHp, lessThan(afterMission));
-    });
-
-    // Regression guard: a burn left running past close() would keep draining
-    // health after the match is over.
-    //
-    // A plain test because blocTest closes the bloc before verify, which would
-    // cancel the timer regardless of whether the code did.
-    test('closing the bloc cancels the burn clock', () async {
-      final bloc = build(effect: MissionEffect.burn);
-
-      await playMission(bloc);
-      expect(bloc.isBurnTimerActive, isTrue);
-
-      await bloc.close();
-
-      expect(bloc.isBurnTimerActive, isFalse);
+      expect(bloc.state, before);
     });
   });
 }
+
+// ---------------------------------------------------------------- fixtures
+
+Map<String, dynamic> _matched({bool isBot = true}) => {
+      'type': 'matched',
+      'matchId': 'm1',
+      'you': 'a',
+      'isBot': isBot,
+      'resumeToken': 'tok',
+      'protocolVersion': 1,
+    };
+
+Map<String, dynamic> _mission(String id) => {
+      'id': id,
+      'type': 'vocabulary',
+      'tier': 2,
+      'pace': 'medium',
+      'prompt': 'farmer',
+      'objectives': [
+        {
+          'id': 'o1',
+          'text': 'Explain it',
+          'mode': 'speak',
+          'timeLimitSec': 8,
+          'gradingTier': 'binary',
+        },
+        {
+          'id': 'o2',
+          'text': 'Use it in a sentence',
+          'mode': 'speak',
+          'timeLimitSec': 8,
+          'gradingTier': 'binary',
+        },
+      ],
+    };
+
+Map<String, dynamic> _board() => {
+      'type': 'board',
+      'slots': [for (var i = 0; i < 4; i++) _mission('m$i')],
+      'phase': 'idle',
+      'idleDeadline': null,
+    };
+
+Map<String, dynamic> _cardOpened({bool defenseAllowed = true}) => {
+      'type': 'card_opened',
+      'slotIndex': 0,
+      'mission': _mission('m0'),
+      'defenseAllowed': defenseAllowed,
+    };
+
+Map<String, dynamic> _resolveStart() => {
+      'type': 'resolve_start',
+      'objectives': (_mission('m0')['objectives'] as List<dynamic>),
+      'cardSeconds': 16,
+      'startedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+
+Map<String, dynamic> _objectiveResult(String id, {required bool passed, bool mine = true}) => {
+      'type': 'objective_result',
+      'objectiveId': id,
+      'passed': passed,
+      'whose': mine ? 'you' : 'opponent',
+    };
+
+Map<String, dynamic> _turnSettled({
+  String reason = 'count',
+  String outcome = 'you_win',
+  List<String> blocked = const [],
+}) =>
+    {
+      'type': 'turn_settled',
+      'outcome': outcome,
+      'reason': reason,
+      'you': {'n': 2, 'completedTime': 8200, 'damageDealt': 3.2},
+      'opponent': {'n': 1, 'completedTime': 9100, 'damageDealt': 0},
+      'blocked': blocked,
+      'effect': null,
+    };

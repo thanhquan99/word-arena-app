@@ -147,22 +147,24 @@ class _SwordRow extends StatelessWidget {
 ///
 /// Shown before the card is tapped (Game_Rule section 8): taking a risky
 /// mission is meant to be a decision, not a surprise. The tooltip carries the
-/// rule, because thirteen unexplained icons are thirteen riddles.
+/// rule, because eleven unexplained icons are eleven riddles.
 class EffectBadge extends StatelessWidget {
   const EffectBadge({super.key, required this.effect});
 
   final MissionEffect effect;
 
-  static const _kindColors = <EffectKind, Color>{
-    EffectKind.good: Color(0xFF4CAF50),
-    EffectKind.risky: Color(0xFFEF5350),
-    EffectKind.special: Color(0xFF64B5F6),
+  /// Colour by who the effect aims at (§8): green helps you, red hurts them,
+  /// blue rewrites the turn for both.
+  static const _groupColors = <EffectGroup, Color>{
+    EffectGroup.self: Color(0xFF4CAF50),
+    EffectGroup.opponent: Color(0xFFEF5350),
+    EffectGroup.turn: Color(0xFF64B5F6),
   };
 
   @override
   Widget build(BuildContext context) {
     final info = effectInfo(effect);
-    final color = _kindColors[info.kind]!;
+    final color = _groupColors[info.group]!;
 
     return Tooltip(
       message: '${info.label} — ${info.description}',

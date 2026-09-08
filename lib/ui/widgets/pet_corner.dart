@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../game/bloc/game_state.dart';
+import '../../net/protocol.dart';
 import '../../pet/pet_spec.dart';
 import '../../pet/pet_view.dart';
 
@@ -41,14 +42,9 @@ class _PetCornerState extends State<PetCorner> {
 
   /// Health last seen, to tell who the incoming damage landed on. GameState
   /// reports the amount but not the target.
-  int? _lastSelfHp;
-  int? _lastEnemyHp;
-
   @override
   void initState() {
     super.initState();
-    _lastSelfHp = widget.state.playerHp;
-    _lastEnemyHp = widget.state.botHp;
   }
 
   @override
@@ -57,34 +53,38 @@ class _PetCornerState extends State<PetCorner> {
     _syncReaction();
   }
 
+  /// Fires cast or hurt at the `strike` beat.
+  ///
+  /// This used to key off `lastTurn` arriving and infer direction by watching
+  /// which health bar dropped — necessary when scoring was instantaneous and
+  /// the turn result was all there was to go on. The server now holds a beat
+  /// open for the animation, and the result says outright who dealt what.
   void _syncReaction() {
     final s = widget.state;
-    final damage = s.lastDamage;
 
-    // Track health so a later hit can be attributed even if lastDamage
-    // repeats the same number.
-    final selfDropped = _lastSelfHp != null && s.playerHp < _lastSelfHp!;
-    final enemyDropped = _lastEnemyHp != null && s.botHp < _lastEnemyHp!;
-    _lastSelfHp = s.playerHp;
-    _lastEnemyHp = s.botHp;
-
-    if (damage == null || damage <= 0) {
-      _reactedTo = null;
+    if (s.turnStage != TurnStage.strike) {
+      if (s.turnStage == null) _reactedTo = null;
       return;
     }
-    if (damage == _reactedTo && !selfDropped && !enemyDropped) return;
-    _reactedTo = damage;
 
-    // The player's pet casts when the opponent loses health, and takes the hit
-    // when the player does. The opponent's pet is the mirror of that.
-    final hitMe = widget.isPlayer ? selfDropped : enemyDropped;
-    final hitThem = widget.isPlayer ? enemyDropped : selfDropped;
-    final PetPose? pose = hitMe
-        ? PetPose.hurt
-        : hitThem
-            ? PetPose.cast
-            : null;
-    if (pose == null) return;
+    final turn = s.lastTurn;
+    if (turn == null) return;
+
+    final youDealt = turn.you.damageDealt;
+    final theyDealt = turn.opponent.damageDealt;
+    if (youDealt <= 0 && theyDealt <= 0) return; // an empty turn strikes nobody
+
+    final marker = youDealt + theyDealt;
+    if (marker == _reactedTo) return;
+    _reactedTo = marker;
+
+    // 🎯 All-out has both sides dealing damage, so both pets cast.
+    final iDealt = widget.isPlayer ? youDealt : theyDealt;
+    final theyDealtAtMe = widget.isPlayer ? theyDealt : youDealt;
+
+    final PetPose pose =
+        iDealt > 0 ? PetPose.cast : (theyDealtAtMe > 0 ? PetPose.hurt : PetPose.perch);
+    if (pose == PetPose.perch) return;
 
     setState(() => _reaction = pose);
   }
@@ -95,7 +95,8 @@ class _PetCornerState extends State<PetCorner> {
     final s = widget.state;
 
     // Stunned reads as grounded, whichever side it is.
-    if (widget.isPlayer && s.isStunned) return PetPose.perch;
+    final stunned = s.stunSecondsLeft(DateTime.now().millisecondsSinceEpoch) > 0;
+    if (widget.isPlayer && stunned) return PetPose.perch;
 
     // The player is committed to a mission during resolving, so their pet
     // flies; the opponent's waits. Outside that both are at rest.
@@ -108,7 +109,7 @@ class _PetCornerState extends State<PetCorner> {
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
-    final dead = widget.isPlayer ? s.playerHp <= 0 : s.botHp <= 0;
+    final dead = widget.isPlayer ? s.yourHp <= 0 : s.opponentHp <= 0;
 
     return Opacity(
       // A defeated pet dims rather than vanishing: an empty slot reads as a

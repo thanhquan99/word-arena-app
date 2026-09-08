@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../content/models.dart';
 import '../../game/bloc/game_state.dart';
+import '../../net/protocol.dart';
 import '../../pet/pet_spec.dart';
 import '../theme/arena_theme.dart';
 import 'damage_number.dart';
 import 'effect_layer.dart';
 import 'hp_bar_widget.dart';
+import 'status_bar.dart';
 import 'mission_card_widget.dart';
 import 'pet_corner.dart';
 
@@ -47,37 +49,93 @@ class _BoardWidgetState extends State<BoardWidget> {
   /// Restarts the particle burst; null while nothing is flying.
   int? _burstId;
   int _nextBurstId = 0;
+  _Burst? _burst;
+
+  /// Where each fighter actually is on screen, so a strike can travel between
+  /// them instead of from a guessed midpoint.
+  final _playerPetKey = GlobalKey();
+  final _opponentPetKey = GlobalKey();
 
   @override
   void didUpdateWidget(BoardWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncDamage();
+    _syncStrike();
   }
 
   @override
   void initState() {
     super.initState();
-    _syncDamage();
+    _syncStrike();
   }
 
-  void _syncDamage() {
-    final damage = widget.state.lastDamage;
-    if (damage == null || damage <= 0 || damage == _shownDamage) return;
+  /// Fires the strike animation at the `strike` beat.
+  ///
+  /// It used to fire the moment `lastTurn` arrived — which was also the moment
+  /// the board refilled, so the burst raced a new set of cards. The server now
+  /// holds a beat open for exactly this (feature-06).
+  void _syncStrike() {
+    final state = widget.state;
+    if (state.turnStage != TurnStage.strike) return;
+
+    final turn = state.lastTurn;
+    if (turn == null) return;
+
+    // Whoever dealt damage strikes. An empty turn animates nothing.
+    final youDealt = turn.you.damageDealt;
+    final theyDealt = turn.opponent.damageDealt;
+    final damage = youDealt > 0 ? youDealt : theyDealt;
+    if (damage <= 0 || damage == _shownDamage) return;
+
     _shownDamage = damage;
-    // initState runs during build, so defer the setState that shows the number.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final burst = _resolveBurst(attackerIsYou: youDealt > 0);
+      if (burst == null) return;
+
       setState(() {
+        _burst = burst;
         _floatingDamage = damage.round();
         _burstId = _nextBurstId++;
       });
     });
   }
 
+  /// Resolves the two pets' real positions into a travel path.
+  _Burst? _resolveBurst({required bool attackerIsYou}) {
+    final fromKey = attackerIsYou ? _playerPetKey : _opponentPetKey;
+    final toKey = attackerIsYou ? _opponentPetKey : _playerPetKey;
+
+    final from = _centreOf(fromKey);
+    final to = _centreOf(toKey);
+    if (from == null || to == null) return null;
+
+    return _Burst(
+      from: from,
+      to: to,
+      // `PetSpec.primary` is documented as covering projectiles and the impact
+      // burst — the intent was there from feature-04, just never wired up.
+      color: (attackerIsYou ? widget.playerPet : widget.opponentPet).primary,
+    );
+  }
+
+  Offset? _centreOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    final arena = _arenaKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || arena == null || !box.hasSize) return null;
+
+    final topLeft = box.localToGlobal(Offset.zero, ancestor: arena);
+    return topLeft + Offset(box.size.width / 2, box.size.height / 2);
+  }
+
+  final _arenaKey = GlobalKey();
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
-    final interactive = state.phase == GamePhase.idle && !state.isStunned;
+    // The server refuses taps from a stunned player anyway (§8.2); greying
+    // the cards is how the client explains why.
+    final stunned = state.stunSecondsLeft(DateTime.now().millisecondsSinceEpoch) > 0;
+    final interactive = state.canTap && !stunned;
 
     return Container(
       // The warm ground of Direction A. The generated pet sprites are drawn
@@ -93,78 +151,38 @@ class _BoardWidgetState extends State<BoardWidget> {
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: Stack(
-            alignment: Alignment.center,
+          child: Column(
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _Flank(
-                    pet: PetCorner(
-                      spec: widget.playerPet,
-                      state: state,
-                      isPlayer: true,
-                    ),
-                    bar: HpBarWidget(
-                      label: 'Bạn',
-                      hp: state.playerHp,
-                      maxHp: GameState.maxHp,
-                      baseColor: Arena.self,
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _MissionGrid(
-                        missions: state.missions,
-                        enabled: interactive,
-                        onTap: widget.onMissionTapped,
-                      ),
-                    ),
-                  ),
-                  _Flank(
-                    pet: PetCorner(
-                      spec: widget.opponentPet,
-                      state: state,
-                      isPlayer: false,
-                    ),
-                    bar: HpBarWidget(
-                      label: 'Đối thủ',
-                      hp: state.botHp,
-                      maxHp: GameState.maxHp,
-                      baseColor: Arena.enemy,
-                    ),
-                  ),
-                ],
+              // The arena sits on top, sized to its content: two fighters side
+              // by side, each with their pet above their bar. Feature-04 put
+              // them in narrow side columns, which left no room for a strike
+              // to travel across.
+              _Arena(
+                key: _arenaKey,
+                state: state,
+                playerPet: widget.playerPet,
+                opponentPet: widget.opponentPet,
+                playerKey: _playerPetKey,
+                opponentKey: _opponentPetKey,
+                burstId: _burstId,
+                burst: _burst,
+                onBurstDone: () {
+                  if (mounted) setState(() => _burstId = null);
+                },
+                floatingDamage: _floatingDamage,
+                damageKey: _shownDamage,
+                onDamageDone: () {
+                if (mounted) setState(() => _floatingDamage = null);
+                },
               ),
-              if (_burstId != null)
-                LayoutBuilder(
-                  builder: (context, constraints) => EffectLayer(
-                    key: ValueKey(_burstId),
-                    // From the middle of the board out to the opponent's bar.
-                    origin: Offset(
-                      constraints.maxWidth / 2,
-                      constraints.maxHeight / 2,
-                    ),
-                    target: Offset(
-                      constraints.maxWidth,
-                      constraints.maxHeight / 2,
-                    ),
-                    color: Arena.enemy,
-                    onComplete: () {
-                      if (mounted) setState(() => _burstId = null);
-                    },
-                  ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: _MissionGrid(
+                  missions: state.slots,
+                  enabled: interactive,
+                  onTap: widget.onMissionTapped,
                 ),
-              if (_floatingDamage != null)
-                DamageNumber(
-                  // A new key restarts the animation for each distinct hit.
-                  key: ValueKey(_shownDamage),
-                  amount: _floatingDamage!,
-                  onComplete: () {
-                    if (mounted) setState(() => _floatingDamage = null);
-                  },
-                ),
+              ),
             ],
           ),
         ),
@@ -173,43 +191,233 @@ class _BoardWidgetState extends State<BoardWidget> {
   }
 }
 
-/// A fighter's column: their pet above, their health bar below.
+/// The two fighters, side by side.
 ///
-/// The pet sits on top rather than alongside because the bars run the full
-/// height of the board — putting the pet beside one would eat into the mission
-/// grid, which is the part players actually aim at.
-class _Flank extends StatelessWidget {
-  const _Flank({required this.pet, required this.bar});
+/// Each side is one column — pet portrait and name on top, health bar under
+/// it, carried effects under that. Putting them level rather than stacking
+/// one above the other lets a strike travel straight across, and keeps both
+/// health bars readable in one glance.
+class _Arena extends StatelessWidget {
+  const _Arena({
+    super.key,
+    required this.state,
+    required this.playerPet,
+    required this.opponentPet,
+    required this.playerKey,
+    required this.opponentKey,
+    required this.burstId,
+    required this.burst,
+    required this.onBurstDone,
+    required this.floatingDamage,
+    required this.damageKey,
+    required this.onDamageDone,
+  });
 
-  final Widget pet;
-  final Widget bar;
+  final GameState state;
+  final PetSpec playerPet;
+  final PetSpec opponentPet;
+  final GlobalKey playerKey;
+  final GlobalKey opponentKey;
 
-  /// Width of the pet column. The health bar is 34px, so this trades 22px of
-  /// mission-grid width per side for a sprite that reads as a creature rather
-  /// than an icon: the generated art carries stripes, feathers and a face,
-  /// none of which survives at bar width.
-  static const _width = 56.0;
+  final int? burstId;
+  final _Burst? burst;
+  final VoidCallback onBurstDone;
+
+  final int? floatingDamage;
+  final double? damageKey;
+  final VoidCallback onDamageDone;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: _width,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox.square(dimension: _width, child: pet),
-          const SizedBox(height: 6),
-          Expanded(child: Center(child: bar)),
-        ],
-      ),
+    return Stack(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _Fighter(
+                petKey: playerKey,
+                spec: playerPet,
+                state: state,
+                isPlayer: true,
+                label: 'Bạn',
+                hp: state.yourHp,
+                barColour: Arena.self,
+                status: state.yourStatus,
+                statusLabel: 'của bạn',
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _Fighter(
+                petKey: opponentKey,
+                spec: opponentPet,
+                state: state,
+                isPlayer: false,
+                label: state.isBot ? 'Bot' : 'Đối thủ',
+                hp: state.opponentHp,
+                barColour: Arena.enemy,
+                status: state.opponentStatus,
+                statusLabel: 'đối thủ',
+                // Mirrored so the two pets face one another across the gap.
+                facingLeft: true,
+              ),
+            ),
+          ],
+        ),
+
+        if (burstId != null && burst != null)
+          Positioned.fill(
+            child: EffectLayer(
+              key: ValueKey(burstId),
+              origin: burst!.from,
+              target: burst!.to,
+              color: burst!.color,
+              onComplete: onBurstDone,
+            ),
+          ),
+
+        if (floatingDamage != null && burst != null)
+          Positioned(
+            left: burst!.to.dx - 30,
+            top: burst!.to.dy - 40,
+            child: DamageNumber(
+              // A new key restarts the animation for each distinct hit.
+              key: ValueKey(damageKey),
+              amount: floatingDamage!,
+              onComplete: onDamageDone,
+            ),
+          ),
+      ],
     );
   }
 }
 
-/// Five slots in a 2-2-1 grid, which keeps every card thumb-reachable.
-///
-/// Hand-built rather than a GridView: the last row holds a single centred card,
-/// which an evenly divided grid cannot express.
+/// One side: portrait and name, then the health bar, then carried effects.
+class _Fighter extends StatelessWidget {
+  const _Fighter({
+    required this.petKey,
+    required this.spec,
+    required this.state,
+    required this.isPlayer,
+    required this.label,
+    required this.hp,
+    required this.barColour,
+    required this.status,
+    required this.statusLabel,
+    this.facingLeft = false,
+  });
+
+  final GlobalKey petKey;
+  final PetSpec spec;
+  final GameState state;
+  final bool isPlayer;
+
+  /// Who this is — "Bạn", or the opponent's name.
+  final String label;
+  final int hp;
+  final Color barColour;
+  final PlayerStatus status;
+  final String statusLabel;
+
+  /// Flips the portrait so the two pets look at each other.
+  final bool facingLeft;
+
+  @override
+  Widget build(BuildContext context) {
+    final pet = _PetSlot(
+      key: petKey,
+      child: facingLeft
+          ? Transform.flip(
+              flipX: true,
+              child: PetCorner(spec: spec, state: state, isPlayer: isPlayer),
+            )
+          : PetCorner(spec: spec, state: state, isPlayer: isPlayer),
+    );
+
+    final nameplate = Column(
+      crossAxisAlignment:
+          facingLeft ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: Arena.ink,
+          ),
+        ),
+        Text(
+          spec.name.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: spec.primary,
+          ),
+        ),
+        Text(
+          '$hp / ${GameState.maxHp}',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Arena.inkSoft,
+          ),
+        ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment:
+              facingLeft ? MainAxisAlignment.end : MainAxisAlignment.start,
+          children: facingLeft
+              ? [Flexible(child: nameplate), const SizedBox(width: 8), pet]
+              : [pet, const SizedBox(width: 8), Flexible(child: nameplate)],
+        ),
+        const SizedBox(height: 6),
+        HpBarWidget(
+          label: '',
+          hp: hp,
+          maxHp: GameState.maxHp,
+          baseColor: barColour,
+          axis: HpBarAxis.horizontal,
+        ),
+        const SizedBox(height: 5),
+        StatusBar(status: status, label: statusLabel),
+      ],
+    );
+  }
+}
+
+/// A fixed box for one pet, carrying a key so a strike can find where it is.
+class _PetSlot extends StatelessWidget {
+  const _PetSlot({super.key, required this.child});
+
+  final Widget child;
+
+  static const _size = 84.0;
+
+  @override
+  Widget build(BuildContext context) =>
+      SizedBox.square(dimension: _size, child: child);
+}
+
+/// Where a strike travels and in what colour, resolved from real screen
+/// positions rather than guessed from the board's midpoint.
+class _Burst {
+  const _Burst({required this.from, required this.to, required this.color});
+
+  final Offset from;
+  final Offset to;
+  final Color color;
+}
+
 class _MissionGrid extends StatelessWidget {
   const _MissionGrid({
     required this.missions,
@@ -240,22 +448,14 @@ class _MissionGrid extends StatelessWidget {
           ),
         );
 
+    // Four cards on an even 2x2 grid (Game_Rule v2 §2). The old five-card
+    // board needed a 2-2-1 shape with one card stranded at half width; four
+    // divides cleanly, which is the whole reason the count changed.
     return Column(
       children: [
         row([0, 1]),
         const SizedBox(height: 10),
         row([2, 3]),
-        const SizedBox(height: 10),
-        // The heavy mission sits alone, half width, centred.
-        Expanded(
-          child: Row(
-            children: [
-              const Spacer(),
-              Expanded(flex: 2, child: card(4)),
-              const Spacer(),
-            ],
-          ),
-        ),
       ],
     );
   }

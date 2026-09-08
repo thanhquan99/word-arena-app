@@ -14,6 +14,13 @@ const mercyThreshold = 0.3;
 /// Fills from the bottom up, which reads as a tank draining — the horizontal
 /// bars this replaced put the two players at opposite edges of the screen and
 /// left the middle cramped.
+/// Which way a health bar runs.
+///
+/// Vertical came first, from feature-04's side flanks. Feature-06 moved the
+/// two combatants to the top of the screen facing each other, which needs the
+/// bars to run across.
+enum HpBarAxis { vertical, horizontal }
+
 class HpBarWidget extends StatelessWidget {
   const HpBarWidget({
     super.key,
@@ -21,6 +28,7 @@ class HpBarWidget extends StatelessWidget {
     required this.hp,
     required this.maxHp,
     required this.baseColor,
+    this.axis = HpBarAxis.vertical,
   });
 
   final String label;
@@ -30,7 +38,13 @@ class HpBarWidget extends StatelessWidget {
   /// Colour while health is comfortable; the warning colours override it.
   final Color baseColor;
 
+  final HpBarAxis axis;
+
   static const _width = 34.0;
+
+  /// Bar thickness when it runs across. Slimmer than the vertical bar, which
+  /// had a whole column to itself.
+  static const _thickness = 22.0;
 
   /// Never below empty or above full, however far the damage overshot.
   double get _fraction => maxHp <= 0 ? 0 : (hp / maxHp).clamp(0.0, 1.0);
@@ -43,6 +57,40 @@ class HpBarWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return axis == HpBarAxis.horizontal ? _buildHorizontal() : _buildVertical();
+  }
+
+  /// Runs across, draining left to right.
+  ///
+  /// No label or number of its own — in the side-by-side arena both already
+  /// sit in the nameplate above, and repeating them here only crowds the bar.
+  Widget _buildHorizontal() {
+    return Container(
+      height: _thickness,
+      decoration: BoxDecoration(
+        color: Arena.surface2,
+        borderRadius: BorderRadius.circular(_thickness / 2),
+        border: Arena.borderSm,
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: _fraction,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: _color,
+              borderRadius: BorderRadius.circular(_thickness / 2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVertical() {
     return Column(
       children: [
         Expanded(

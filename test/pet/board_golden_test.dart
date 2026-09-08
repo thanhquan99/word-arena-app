@@ -46,15 +46,16 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(390, 700));
 
     final state = GameState(
-      missions: [
-        mission('farmer', MissionType.vocabulary, 2, 4, Pace.medium),
-        mission('look after', MissionType.phrasalVerb, 3, 4, Pace.medium),
+      // Four cards on a 2x2 grid since Game_Rule v2 §2.
+      slots: [
         mission('thought / taught', MissionType.pronunciation, 2, 2, Pace.fast),
         mission('apple / carrot', MissionType.oddOneOut, 1, 2, Pace.fast),
+        mission('farmer', MissionType.vocabulary, 2, 4, Pace.medium),
         mission('He goes to school', MissionType.tense, 4, 4, Pace.heavy),
       ],
-      playerHp: 38,
-      botHp: 21,
+      yourHp: 38,
+      opponentHp: 21,
+      connection: MatchLink.ready,
     );
 
     await tester.pumpWidget(
